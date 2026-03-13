@@ -60,16 +60,24 @@ vi.stubGlobal('Audio', vi.fn().mockImplementation(() => ({
   play: mockPlay,
   pause: mockPause,
   set onended(fn: () => void) { audioOnEnded = fn; },
-  get onended() { return audioOnEnded; },
+  get onended(): (() => void) | null { return audioOnEnded; },
   set onerror(fn: () => void) { audioOnError = fn; },
-  get onerror() { return audioOnError; },
+  get onerror(): (() => void) | null { return audioOnError; },
 })));
 
-const defaultProps = {
+const defaultProps: {
+  sessionId: string;
+  jobPosition: string;
+  seniorityLevel: 'junior' | 'mid' | 'senior' | 'lead';
+  questionCategory: 'general' | 'technical';
+  currentQuestion: string;
+  onEndSession: ReturnType<typeof vi.fn>;
+  onNextQuestion: ReturnType<typeof vi.fn>;
+} = {
   sessionId: 'sess-1',
   jobPosition: 'Software Engineer',
-  seniorityLevel: 'mid' as const,
-  questionCategory: 'general' as const,
+  seniorityLevel: 'mid',
+  questionCategory: 'general',
   currentQuestion: 'Tell me about yourself.',
   onEndSession: vi.fn(),
   onNextQuestion: vi.fn(),

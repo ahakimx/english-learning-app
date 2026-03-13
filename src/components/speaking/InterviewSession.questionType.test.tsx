@@ -44,8 +44,8 @@ vi.mock('./FeedbackDisplay', () => ({
 vi.stubGlobal('Audio', vi.fn().mockImplementation(() => ({
   play: vi.fn(() => Promise.resolve()),
   pause: vi.fn(),
-  set onended(fn: () => void) {},
-  set onerror(fn: () => void) {},
+  set onended(_fn: () => void) {},
+  set onerror(_fn: () => void) {},
 })));
 
 const defaultProps = {

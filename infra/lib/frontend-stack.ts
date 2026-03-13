@@ -18,7 +18,7 @@ export class FrontendStack extends cdk.Stack {
     // AWS Amplify App for React/Vite SPA
     const amplifyApp = new amplify.CfnApp(this, 'EnglishLearningAmplifyApp', {
       name: 'EnglishLearningApp',
-      platform: 'WEB',
+      platform: 'WEB_COMPUTE',
       buildSpec: [
         'version: 1',
         'frontend:',
@@ -56,12 +56,7 @@ export class FrontendStack extends cdk.Stack {
       ],
     });
 
-    // Main branch for deployment
-    new amplify.CfnBranch(this, 'MainBranch', {
-      appId: amplifyApp.attrAppId,
-      branchName: 'main',
-      enableAutoBuild: true,
-    });
+    // Branch is managed via Amplify Console after connecting GitHub repo
 
     // CloudFormation outputs
     new cdk.CfnOutput(this, 'AmplifyAppId', {

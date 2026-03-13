@@ -1,4 +1,4 @@
-import { uploadData, getUrl } from 'aws-amplify/storage';
+import { uploadData } from 'aws-amplify/storage';
 
 /**
  * Upload an audio blob to S3 via Amplify Storage.

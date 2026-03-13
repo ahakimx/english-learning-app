@@ -146,15 +146,13 @@ export default function GrammarModule() {
 
         {(phase === 'quiz' || phase === 'explanation') && quizData && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            {phase !== 'select' && (
-              <button
-                type="button"
-                onClick={handleBackToTopics}
-                className="text-sm text-gray-500 hover:text-gray-700 mb-4 inline-flex items-center gap-1"
-              >
-                ← Ganti Topik
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleBackToTopics}
+              className="text-sm text-gray-500 hover:text-gray-700 mb-4 inline-flex items-center gap-1"
+            >
+              ← Ganti Topik
+            </button>
 
             <QuizQuestion
               key={quizData.questionId}
