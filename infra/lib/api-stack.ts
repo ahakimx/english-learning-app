@@ -13,6 +13,8 @@ interface ApiStackCdkProps extends cdk.StackProps {
 }
 
 export class ApiStack extends cdk.Stack {
+  public readonly apiUrl: string;
+
   constructor(scope: Construct, id: string, props: ApiStackCdkProps) {
     super(scope, id, props);
 
@@ -99,8 +101,13 @@ export class ApiStack extends cdk.Stack {
     }));
     transcribeHandler.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
-      actions: ['s3:GetObject'],
+      actions: ['s3:GetObject', 's3:HeadObject'],
       resources: [`${storage.audioBucketArn}/*`],
+    }));
+    transcribeHandler.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['s3:ListBucket'],
+      resources: [storage.audioBucketArn],
     }));
 
     // --- Lambda: /speak ---
@@ -161,6 +168,8 @@ export class ApiStack extends cdk.Stack {
     progressResource.addMethod('POST', new apigateway.LambdaIntegration(progressHandler), authMethodOptions);
 
     // --- Outputs ---
+    this.apiUrl = api.url;
+
     new cdk.CfnOutput(this, 'ApiUrl', {
       value: api.url,
       description: 'English Learning App API URL',

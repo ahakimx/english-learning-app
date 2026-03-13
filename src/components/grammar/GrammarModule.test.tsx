@@ -184,11 +184,11 @@ describe('GrammarModule', () => {
     fireEvent.click(screen.getByTestId('option-1')) // 'goes' - correct
 
     await waitFor(() => {
-      expect(mockChat).toHaveBeenCalledWith({
+      expect(mockChat).toHaveBeenCalledWith(expect.objectContaining({
         action: 'grammar_explain',
         grammarTopic: 'tenses',
         selectedAnswer: 'goes',
-      })
+      }))
     })
   })
 

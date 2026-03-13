@@ -2,14 +2,16 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { confirmRegistration } from '../../services/authService';
 
 export default function RegisterForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [step, setStep] = useState<'register' | 'verify'>('register');
   const { register } = useAuth();
   const navigate = useNavigate();
 
@@ -39,7 +41,7 @@ export default function RegisterForm() {
     setLoading(true);
     try {
       await register(email, password);
-      setSuccess(true);
+      setStep('verify');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registrasi gagal. Silakan coba lagi.');
     } finally {
@@ -47,20 +49,69 @@ export default function RegisterForm() {
     }
   }
 
-  if (success) {
+  async function handleVerify(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+
+    if (!verificationCode.trim()) {
+      setError('Masukkan kode verifikasi');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await confirmRegistration(email, verificationCode.trim());
+      navigate('/login');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Kode verifikasi salah. Silakan coba lagi.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (step === 'verify') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <div className="w-full max-w-md bg-white rounded-lg shadow-md p-8 text-center">
-          <h1 className="text-2xl font-bold mb-4">Registrasi Berhasil</h1>
-          <p className="text-gray-600 mb-6">
-            Kami telah mengirimkan email verifikasi ke <strong>{email}</strong>. Silakan verifikasi email Anda sebelum login.
+        <div className="w-full max-w-md bg-white rounded-lg shadow-md p-8">
+          <h1 className="text-2xl font-bold text-center mb-4">Verifikasi Email</h1>
+          <p className="text-gray-600 text-center mb-6">
+            Kami telah mengirimkan kode verifikasi ke <strong>{email}</strong>. Masukkan kode tersebut di bawah ini.
           </p>
-          <button
-            onClick={() => navigate('/login')}
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          >
-            Ke Halaman Login
-          </button>
+
+          {error && (
+            <div role="alert" className="mb-4 p-3 rounded bg-red-50 text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleVerify} className="space-y-4">
+            <div>
+              <label htmlFor="verificationCode" className="block text-sm font-medium text-gray-700 mb-1">
+                Kode Verifikasi
+              </label>
+              <input
+                id="verificationCode"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-lg tracking-widest"
+                placeholder="000000"
+                maxLength={6}
+                disabled={loading}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {loading ? 'Memverifikasi...' : 'Verifikasi'}
+            </button>
+          </form>
         </div>
       </div>
     );

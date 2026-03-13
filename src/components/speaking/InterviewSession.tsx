@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { speak, chat, TimeoutError } from '../../services/apiClient';
 import { useAuth } from '../../hooks/useAuth';
-import type { FeedbackReport } from '../../types';
+import type { FeedbackReport, SeniorityLevel, QuestionCategory, QuestionType } from '../../types';
+import { SENIORITY_LABELS, CATEGORY_LABELS } from './JobPositionSelector';
 import AudioRecorder from './AudioRecorder';
 import TranscriptionDisplay from './TranscriptionDisplay';
 import FeedbackDisplay from './FeedbackDisplay';
@@ -11,7 +12,10 @@ export type SessionPhase = 'listening' | 'recording' | 'processing' | 'feedback'
 interface InterviewSessionProps {
   sessionId: string;
   jobPosition: string;
+  seniorityLevel: SeniorityLevel;
+  questionCategory: QuestionCategory;
   currentQuestion: string;
+  questionType?: QuestionType;
   onEndSession: () => void;
   onNextQuestion: () => void;
 }
@@ -19,7 +23,10 @@ interface InterviewSessionProps {
 export default function InterviewSession({
   sessionId,
   jobPosition,
+  seniorityLevel,
+  questionCategory,
   currentQuestion,
+  questionType,
   onEndSession,
   onNextQuestion,
 }: InterviewSessionProps) {
@@ -159,11 +166,17 @@ export default function InterviewSession({
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span className="text-xs font-medium text-blue-600 uppercase tracking-wide">
             Posisi: {jobPosition}
           </span>
-          <span className="text-xs text-gray-400 ml-4" data-testid="session-id">
+          <span className="text-xs font-medium text-purple-600 uppercase tracking-wide" data-testid="session-seniority">
+            Tingkat: {SENIORITY_LABELS[seniorityLevel]}
+          </span>
+          <span className="text-xs font-medium text-green-600 uppercase tracking-wide" data-testid="session-category">
+            Kategori: {CATEGORY_LABELS[questionCategory].label}
+          </span>
+          <span className="text-xs text-gray-400" data-testid="session-id">
             Sesi: {sessionId}
           </span>
         </div>
@@ -181,6 +194,18 @@ export default function InterviewSession({
       {/* Question */}
       <div className="bg-white border border-gray-200 rounded-lg p-5">
         <h3 className="text-sm font-semibold text-gray-500 mb-2">Pertanyaan Interview</h3>
+        {questionType && (
+          <span
+            data-testid="question-type-badge"
+            className={`inline-block text-xs font-medium px-2.5 py-0.5 rounded-full mb-2 ${
+              questionType === 'introduction'
+                ? 'bg-blue-100 text-blue-700'
+                : 'bg-purple-100 text-purple-700'
+            }`}
+          >
+            {questionType === 'introduction' ? 'Perkenalan' : 'Pertanyaan Lanjutan'}
+          </span>
+        )}
         <p className="text-gray-800 leading-relaxed" data-testid="interview-question">
           {currentQuestion}
         </p>

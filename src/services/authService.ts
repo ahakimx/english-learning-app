@@ -46,7 +46,7 @@ export async function logout(): Promise<void> {
 
 export async function refreshSession(): Promise<string | null> {
   const session = await fetchAuthSession({ forceRefresh: true });
-  return session.tokens?.accessToken?.toString() ?? null;
+  return session.tokens?.idToken?.toString() ?? null;
 }
 
 export async function getCurrentAuthUser(): Promise<AuthUser | null> {
@@ -67,7 +67,7 @@ export async function getCurrentAuthUser(): Promise<AuthUser | null> {
 export async function getAccessToken(): Promise<string | null> {
   try {
     const session = await fetchAuthSession();
-    return session.tokens?.accessToken?.toString() ?? null;
+    return session.tokens?.idToken?.toString() ?? null;
   } catch {
     return null;
   }

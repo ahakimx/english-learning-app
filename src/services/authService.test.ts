@@ -82,7 +82,7 @@ describe('authService', () => {
   describe('getAccessToken', () => {
     it('returns token string when session exists', async () => {
       mockFetchAuthSession.mockResolvedValue({
-        tokens: { accessToken: { toString: () => 'mock-token-123' } },
+        tokens: { idToken: { toString: () => 'mock-token-123' } },
       })
       const token = await getAccessToken()
       expect(token).toBe('mock-token-123')
@@ -158,8 +158,7 @@ describe('Property: Token logout menjadi tidak valid', () => {
           // --- Phase 1: Simulate a valid authenticated state ---
           mockFetchAuthSession.mockResolvedValue({
             tokens: {
-              accessToken: { toString: () => accessToken },
-              idToken: { payload: { email } },
+              idToken: { toString: () => accessToken, payload: { email } },
             },
           })
           mockGetCurrentUser.mockResolvedValue({ userId, username: email })

@@ -14,6 +14,7 @@ export default function GrammarModule() {
   const [error, setError] = useState<string | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
   const [quizData, setQuizData] = useState<QuizData | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const [explanation, setExplanation] = useState<string | null>(null)
   const [lastAnswer, setLastAnswer] = useState<{ selected: string; isCorrect: boolean } | null>(null)
   const [score, setScore] = useState({ correct: 0, total: 0 })
@@ -31,6 +32,7 @@ export default function GrammarModule() {
       const response = await chat({ action: 'grammar_quiz', grammarTopic: topic })
       if (response.quizData) {
         setQuizData(response.quizData)
+        setSessionId(response.sessionId ?? null)
         setExplanation(null)
         setLastAnswer(null)
         setPhase('quiz')
@@ -67,6 +69,7 @@ export default function GrammarModule() {
     try {
       const response = await chat({
         action: 'grammar_explain',
+        sessionId: sessionId ?? undefined,
         grammarTopic: selectedTopic ?? undefined,
         selectedAnswer,
       })
@@ -89,6 +92,7 @@ export default function GrammarModule() {
     setPhase('select')
     setSelectedTopic(null)
     setQuizData(null)
+    setSessionId(null)
     setExplanation(null)
     setLastAnswer(null)
     setScore({ correct: 0, total: 0 })

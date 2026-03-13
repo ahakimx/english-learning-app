@@ -2,7 +2,7 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { ChatRequest, ChatResponse, FeedbackReport, SummaryReport, QuizData, WritingReviewData } from '../../lib/types';
+import { ChatRequest, ChatResponse, FeedbackReport, SummaryReport, QuizData, WritingReviewData, SeniorityLevel, QuestionCategory, QuestionType } from '../../lib/types';
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
@@ -36,6 +36,19 @@ const REQUIRED_FIELDS: Record<ChatRequest['action'], (keyof ChatRequest)[]> = {
   writing_prompt: ['writingType'],
   writing_review: ['sessionId', 'writingContent'],
 };
+
+const BEDROCK_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+
+const VALID_SENIORITY_LEVELS: SeniorityLevel[] = ['junior', 'mid', 'senior', 'lead'];
+const VALID_QUESTION_CATEGORIES: QuestionCategory[] = ['general', 'technical'];
+
+const INTRODUCTION_QUESTIONS: Record<SeniorityLevel, string> = {
+  junior: 'Please introduce yourself and tell me about your educational background and any relevant experience or projects that prepared you for this role.',
+  mid: 'Please introduce yourself and walk me through your professional experience, highlighting key achievements relevant to this role.',
+  senior: 'Please introduce yourself and describe your career journey, focusing on leadership experiences and significant technical contributions.',
+  lead: 'Please introduce yourself and share your experience leading teams, driving technical strategy, and delivering large-scale projects.',
+};
+
 
 // --- Custom error for authorization failures ---
 
@@ -88,36 +101,106 @@ function validateRequest(body: Record<string, unknown>): { valid: false; message
     }
   }
 
+  if (typedAction === 'start_session') {
+    const seniorityLevel = body.seniorityLevel;
+    if (seniorityLevel !== undefined && !VALID_SENIORITY_LEVELS.includes(seniorityLevel as SeniorityLevel)) {
+      return { valid: false, message: `Invalid seniorityLevel: '${seniorityLevel}'. Must be one of: ${VALID_SENIORITY_LEVELS.join(', ')}` };
+    }
+    const questionCategory = body.questionCategory;
+    if (questionCategory !== undefined && !VALID_QUESTION_CATEGORIES.includes(questionCategory as QuestionCategory)) {
+      return { valid: false, message: `Invalid questionCategory: '${questionCategory}'. Must be one of: ${VALID_QUESTION_CATEGORIES.join(', ')}` };
+    }
+  }
+
   return { valid: true, request: body as unknown as ChatRequest };
 }
+
+// --- Question type selection ---
+
+function determineQuestionType(
+  questions: Array<{ questionType?: QuestionType; transcription?: string }>
+): 'contextual' {
+  return 'contextual';
+}
+
+
+// --- Contextual prompt builder ---
+
+function buildContextualPrompt(
+  jobPosition: string,
+  seniorityLevel: SeniorityLevel,
+  questionCategory: QuestionCategory,
+  questions: Array<{ questionText: string; transcription?: string }>,
+  previousQuestionTexts: string[]
+): string {
+  // Extract Q&A pairs with non-empty transcription
+  const answeredPairs = questions.filter(
+    (q) => q.transcription !== undefined && q.transcription !== ''
+  );
+
+  const categoryInstruction = questionCategory === 'general'
+    ? 'Focus on behavioral, soft skills, or motivation questions appropriate for this seniority level.'
+    : 'Focus on role-specific technical questions appropriate for this job position and seniority level.';
+
+  const previousList = previousQuestionTexts
+    .map((q, i) => `${i + 1}. ${q}`)
+    .join('\n');
+
+  // Fallback: No transcriptions at all → general position prompt
+  if (answeredPairs.length === 0) {
+    return `You are an experienced job interviewer conducting a ${seniorityLevel}-level interview for a ${jobPosition} position.
+
+${categoryInstruction}
+
+Generate a relevant interview question for this position and seniority level. The question should be professional and suitable for an English language assessment. Return ONLY the question text, nothing else.
+
+Do NOT repeat or rephrase any of these previously asked questions:
+${previousList}`;
+  }
+
+  // Has transcriptions → take up to 3 most recent Q&A pairs
+  const recentPairs = answeredPairs.slice(-3);
+
+  // Format Q&A pairs with labeled prefixes
+  const conversationLines = recentPairs
+    .map((pair, index) => {
+      const num = index + 1;
+      return `Q${num}: ${pair.questionText}\nA${num}: ${pair.transcription}`;
+    })
+    .join('\n\n');
+
+  return `You are an experienced job interviewer conducting a ${seniorityLevel}-level interview for a ${jobPosition} position.
+
+${categoryInstruction}
+
+Here is the recent conversation from this interview:
+
+${conversationLines}
+
+Based on the candidate's most recent answer, generate a follow-up question that:
+- Probes deeper into a specific detail or claim from their answer
+- OR asks for clarification on something they mentioned
+- OR explores a related aspect of the topic they discussed
+
+Reference specific details from their most recent answer. The question should be professional and suitable for an English language assessment. Return ONLY the question text, nothing else.
+
+Do NOT repeat or rephrase any of these previously asked questions:
+${previousList}`;
+}
+
 
 // --- Action handlers (stubs for tasks 5.2-5.4, 6.1-6.2) ---
 
 async function handleStartSession(userId: string, request: ChatRequest): Promise<ChatResponse> {
   const sessionId = crypto.randomUUID();
   const now = new Date().toISOString();
+  const seniorityLevel: SeniorityLevel = request.seniorityLevel ?? 'mid';
+  const questionCategory: QuestionCategory = request.questionCategory ?? 'general';
 
-  // Call Bedrock to generate the first interview question
-  const prompt = `You are an experienced job interviewer. Generate one interview question for a ${request.jobPosition} position. The question should be professional, relevant to the role, and suitable for an English language assessment. Return ONLY the question text, nothing else.`;
-
-  const bedrockResponse = await bedrockClient.send(
-    new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 300,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
-  );
-
-  const bedrockBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
-  const questionText = bedrockBody.content[0].text.trim();
+  // Hardcoded self-introduction question — no Bedrock call
+  const questionText = INTRODUCTION_QUESTIONS[seniorityLevel];
   const questionId = crypto.randomUUID();
 
-  // Save session metadata to DynamoDB
   await docClient.send(
     new PutCommand({
       TableName: process.env.SESSIONS_TABLE_NAME,
@@ -127,7 +210,9 @@ async function handleStartSession(userId: string, request: ChatRequest): Promise
         type: 'speaking',
         status: 'active',
         jobPosition: request.jobPosition,
-        questions: [{ questionId, questionText }],
+        seniorityLevel,
+        questionCategory,
+        questions: [{ questionId, questionText, questionType: 'introduction' as const }],
         createdAt: now,
         updatedAt: now,
       },
@@ -138,8 +223,11 @@ async function handleStartSession(userId: string, request: ChatRequest): Promise
     sessionId,
     type: 'question',
     content: questionText,
+    questionType: 'introduction' as const,
   };
 }
+
+
 
 
 async function handleAnalyzeAnswer(userId: string, request: ChatRequest): Promise<ChatResponse> {
@@ -206,7 +294,7 @@ Analyze this answer and return the JSON assessment.`;
 
   const bedrockResponse = await bedrockClient.send(
     new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+      modelId: BEDROCK_MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -242,10 +330,7 @@ Analyze this answer and return the JSON assessment.`;
     new UpdateCommand({
       TableName: process.env.SESSIONS_TABLE_NAME,
       Key: { userId, sessionId },
-      UpdateExpression: 'SET questions[#idx].feedback = :feedback, questions[#idx].transcription = :transcription, questions[#idx].answeredAt = :answeredAt, updatedAt = :updatedAt',
-      ExpressionAttributeNames: {
-        '#idx': questionIndex.toString(),
-      },
+      UpdateExpression: `SET questions[${questionIndex}].feedback = :feedback, questions[${questionIndex}].transcription = :transcription, questions[${questionIndex}].answeredAt = :answeredAt, updatedAt = :updatedAt`,
       ExpressionAttributeValues: {
         ':feedback': feedbackReport,
         ':transcription': transcription,
@@ -292,24 +377,20 @@ async function handleNextQuestion(userId: string, request: ChatRequest): Promise
   const questions = session.questions || [];
   const jobPosition = session.jobPosition || 'general';
 
+  // Retrieve seniority and category from session, with backward-compatible defaults
+  const seniorityLevel: SeniorityLevel = session.seniorityLevel ?? 'mid';
+  const questionCategory: QuestionCategory = session.questionCategory ?? 'general';
+
   // 2. Extract all previous question texts
   const previousQuestions = questions.map((q: { questionText: string }) => q.questionText);
 
-  // 3. Call Bedrock with previous questions as context
-  const previousList = previousQuestions
-    .map((q: string, i: number) => `${i + 1}. ${q}`)
-    .join('\n');
-
-  const prompt = `You are an experienced job interviewer. Generate one NEW interview question for a ${jobPosition} position.
-
-The following questions have already been asked in this session — do NOT repeat or rephrase any of them:
-${previousList}
-
-Generate a completely different question that covers a new aspect of the role. Return ONLY the question text, nothing else.`;
+  // 3. Always contextual — buildContextualPrompt handles all fallback scenarios
+  const questionType: QuestionType = 'contextual';
+  const prompt = buildContextualPrompt(jobPosition, seniorityLevel, questionCategory, questions, previousQuestions);
 
   const bedrockResponse = await bedrockClient.send(
     new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+      modelId: BEDROCK_MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -332,19 +413,21 @@ Generate a completely different question that covers a new aspect of the role. R
       Key: { userId, sessionId },
       UpdateExpression: 'SET questions = list_append(questions, :newQuestion), updatedAt = :updatedAt',
       ExpressionAttributeValues: {
-        ':newQuestion': [{ questionId, questionText }],
+        ':newQuestion': [{ questionId, questionText, questionType }],
         ':updatedAt': now,
       },
     })
   );
 
-  // 5. Return ChatResponse with type 'question'
+  // 5. Return ChatResponse with type 'question' and questionType
   return {
     sessionId,
     type: 'question',
     content: questionText,
+    questionType,
   };
 }
+
 
 
 async function handleEndSession(userId: string, request: ChatRequest): Promise<ChatResponse> {
@@ -417,7 +500,7 @@ Generate the summary report JSON.`;
 
   const bedrockResponse = await bedrockClient.send(
     new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+      modelId: BEDROCK_MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -496,7 +579,7 @@ Rules:
 
   const bedrockResponse = await bedrockClient.send(
     new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+      modelId: BEDROCK_MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -601,7 +684,7 @@ Return ONLY the explanation text, no JSON or formatting.`;
 
   const bedrockResponse = await bedrockClient.send(
     new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+      modelId: BEDROCK_MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -660,7 +743,7 @@ Return ONLY the writing prompt text. Make it clear and specific so the student k
 
   const bedrockResponse = await bedrockClient.send(
     new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+      modelId: BEDROCK_MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -757,7 +840,7 @@ Analyze this writing and return the JSON assessment.`;
 
   const bedrockResponse = await bedrockClient.send(
     new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+      modelId: BEDROCK_MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -877,4 +960,4 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 };
 
 // Export for testing
-export { validateRequest, extractUserId, routeAction, VALID_ACTIONS, REQUIRED_FIELDS, AuthorizationError };
+export { validateRequest, extractUserId, routeAction, determineQuestionType, buildContextualPrompt, VALID_ACTIONS, REQUIRED_FIELDS, AuthorizationError, INTRODUCTION_QUESTIONS };

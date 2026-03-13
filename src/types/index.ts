@@ -1,5 +1,11 @@
 // Frontend shared TypeScript type definitions
 
+export type SeniorityLevel = 'junior' | 'mid' | 'senior' | 'lead';
+
+export type QuestionCategory = 'general' | 'technical';
+
+export type QuestionType = 'introduction' | 'contextual';
+
 export interface ChatRequest {
   sessionId?: string;
   action:
@@ -17,6 +23,8 @@ export interface ChatRequest {
   selectedAnswer?: string;
   writingType?: 'essay' | 'email';
   writingContent?: string;
+  seniorityLevel?: SeniorityLevel;
+  questionCategory?: QuestionCategory;
 }
 
 export interface ChatResponse {
@@ -34,6 +42,7 @@ export interface ChatResponse {
   summaryReport?: SummaryReport;
   quizData?: QuizData;
   writingReview?: WritingReviewData;
+  questionType?: QuestionType;
 }
 
 export interface FeedbackReport {

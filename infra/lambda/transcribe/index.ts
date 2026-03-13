@@ -5,10 +5,8 @@ import {
   GetTranscriptionJobCommand,
   TranscriptionJobStatus,
 } from '@aws-sdk/client-transcribe';
-import { S3Client, HeadObjectCommand } from '@aws-sdk/client-s3';
 
 const transcribeClient = new TranscribeClient({});
-const s3Client = new S3Client({});
 
 const AUDIO_BUCKET_NAME = process.env.AUDIO_BUCKET_NAME || '';
 
@@ -20,7 +18,6 @@ const CORS_HEADERS = {
 };
 
 const SUPPORTED_FORMATS = ['webm', 'mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr'];
-const MIN_AUDIO_SIZE_BYTES = 1000; // ~1KB minimum to avoid "too short" audio
 const POLL_INTERVAL_MS = 1000;
 const MAX_POLL_ATTEMPTS = 60; // 60 seconds max wait
 
@@ -54,51 +51,13 @@ function mapExtensionToMediaFormat(ext: string): string {
   return formatMap[ext] || '';
 }
 
-async function validateAudioFile(audioS3Key: string): Promise<{ valid: true } | { valid: false; statusCode: number; message: string }> {
-  const ext = getFileExtension(audioS3Key);
-  if (!ext || !SUPPORTED_FORMATS.includes(ext)) {
-    return {
-      valid: false,
-      statusCode: 400,
-      message: `Format audio tidak didukung: .${ext || '(tidak ada ekstensi)'}. Format yang didukung: ${SUPPORTED_FORMATS.map(f => '.' + f).join(', ')}`,
-    };
-  }
-
-  try {
-    const headResult = await s3Client.send(
-      new HeadObjectCommand({
-        Bucket: AUDIO_BUCKET_NAME,
-        Key: audioS3Key,
-      })
-    );
-
-    const contentLength = headResult.ContentLength ?? 0;
-    if (contentLength < MIN_AUDIO_SIZE_BYTES) {
-      return {
-        valid: false,
-        statusCode: 400,
-        message: 'Audio terlalu pendek. Pastikan rekaman Anda minimal 1 detik.',
-      };
-    }
-
-    return { valid: true };
-  } catch (err: unknown) {
-    const error = err as { name?: string };
-    if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
-      return {
-        valid: false,
-        statusCode: 400,
-        message: 'File audio tidak ditemukan di storage. Silakan upload ulang.',
-      };
-    }
-    throw err;
-  }
-}
-
 async function startTranscriptionJob(audioS3Key: string): Promise<string> {
   const jobName = `transcribe-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
   const ext = getFileExtension(audioS3Key);
   const mediaFormat = mapExtensionToMediaFormat(ext);
+  const mediaFileUri = `s3://${AUDIO_BUCKET_NAME}/${audioS3Key}`;
+
+  console.log('Starting transcription job:', { jobName, bucket: AUDIO_BUCKET_NAME, key: audioS3Key, mediaFileUri });
 
   await transcribeClient.send(
     new StartTranscriptionJobCommand({
@@ -106,7 +65,7 @@ async function startTranscriptionJob(audioS3Key: string): Promise<string> {
       LanguageCode: 'en-US',
       MediaFormat: mediaFormat as 'mp3' | 'mp4' | 'wav' | 'flac' | 'ogg' | 'amr' | 'webm',
       Media: {
-        MediaFileUri: `s3://${AUDIO_BUCKET_NAME}/${audioS3Key}`,
+        MediaFileUri: mediaFileUri,
       },
     })
   );
@@ -187,25 +146,37 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(403, 'Forbidden', 'Akses ditolak: Anda hanya dapat mengakses file audio milik Anda sendiri');
     }
 
-    // Validate audio file (format and size)
-    const validation = await validateAudioFile(audioS3Key);
-    if (!validation.valid) {
-      return errorResponse(validation.statusCode, 'Bad Request', validation.message);
+    // Validate audio file format
+    const ext = getFileExtension(audioS3Key);
+    if (!ext || !SUPPORTED_FORMATS.includes(ext)) {
+      return errorResponse(400, 'Bad Request', `Format audio tidak didukung: .${ext || '(tidak ada ekstensi)'}. Format yang didukung: ${SUPPORTED_FORMATS.map(f => '.' + f).join(', ')}`);
     }
 
     // Start transcription job
-    const jobName = await startTranscriptionJob(audioS3Key);
+    try {
+      const jobName = await startTranscriptionJob(audioS3Key);
 
-    // Poll for results
-    const transcription = await pollTranscriptionResult(jobName);
+      // Poll for results
+      const transcription = await pollTranscriptionResult(jobName);
 
-    return successResponse({
-      transcription,
-      audioS3Key,
-    });
+      return successResponse({
+        transcription,
+        audioS3Key,
+      });
+    } catch (err: unknown) {
+      const error = err as { message?: string; name?: string };
+      if (error.name === 'BadRequestException' || (error.message && error.message.includes("doesn't point"))) {
+        return errorResponse(400, 'Bad Request', `Transcribe tidak bisa akses file audio. Pastikan file sudah terupload dengan benar.`);
+      }
+      throw err;
+    }
   } catch (err: unknown) {
-    const error = err as { message?: string };
-    console.error('Transcribe handler error:', error);
+    const error = err as { message?: string; name?: string; Code?: string };
+    console.error('Transcribe handler error:', JSON.stringify({
+      message: error.message,
+      name: error.name,
+      code: error.Code,
+    }));
 
     // Check for specific error messages to return appropriate status codes
     const message = error.message || 'Terjadi kesalahan internal';
@@ -218,6 +189,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(408, 'Request Timeout', 'Transkripsi membutuhkan waktu terlalu lama. Silakan coba lagi.');
     }
 
-    return errorResponse(500, 'Internal Server Error', 'Terjadi kesalahan internal');
+    if (error.name === 'AccessDeniedException' || message.includes('Access Denied') || message.includes('not authorized')) {
+      return errorResponse(500, 'Internal Server Error', 'Lambda tidak memiliki izin yang diperlukan. Hubungi administrator.');
+    }
+
+    return errorResponse(500, 'Internal Server Error', `Terjadi kesalahan: ${error.name || 'Unknown'} - ${message}`);
   }
 };

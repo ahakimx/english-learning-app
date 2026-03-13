@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { StorageStackOutputs } from './types';
@@ -37,7 +38,6 @@ export class StorageStack extends cdk.Stack {
     const audioBucket = new s3.Bucket(this, 'AudioBucket', {
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       cors: [
@@ -53,6 +53,16 @@ export class StorageStack extends cdk.Stack {
         },
       ],
     });
+
+    // Allow Amazon Transcribe service to read audio files from the bucket
+    audioBucket.addToResourcePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        principals: [new iam.ServicePrincipal('transcribe.amazonaws.com')],
+        actions: ['s3:GetObject', 's3:ListBucket'],
+        resources: [audioBucket.bucketArn, `${audioBucket.bucketArn}/*`],
+      }),
+    );
 
     this.outputs = {
       sessionsTableName: sessionsTable.tableName,

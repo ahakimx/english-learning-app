@@ -29,7 +29,10 @@ const apiStack = new ApiStack(app, 'EnglishLearningApp-ApiStack', {
 apiStack.addDependency(authStack);
 apiStack.addDependency(storageStack);
 
-// 4. Frontend Stack — Amplify Hosting (independent, configured via env vars)
-const frontendStack = new FrontendStack(app, 'EnglishLearningApp-FrontendStack', {
+// 4. Frontend Stack — Amplify Hosting (depends on Auth + Storage + API)
+new FrontendStack(app, 'EnglishLearningApp-FrontendStack', {
   description: 'English Learning App - Frontend Hosting (Amplify)',
+  auth: authStack.outputs,
+  storage: storageStack.outputs,
+  apiUrl: apiStack.apiUrl,
 });

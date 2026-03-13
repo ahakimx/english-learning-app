@@ -1,4 +1,4 @@
-import { uploadData } from 'aws-amplify/storage';
+import { uploadData, getUrl } from 'aws-amplify/storage';
 
 /**
  * Upload an audio blob to S3 via Amplify Storage.
@@ -12,13 +12,17 @@ export async function uploadAudio(
 ): Promise<string> {
   const key = `${userId}/${sessionId}/${questionId}.webm`;
 
-  await uploadData({
+  const result = await uploadData({
     path: key,
     data: blob,
     options: {
       contentType: blob.type || 'audio/webm',
     },
-  });
+  }).result;
 
-  return key;
+  // Use the actual path from the upload result (may differ from input key)
+  const actualPath = result.path;
+  console.log('Upload result - input key:', key, 'actual path:', actualPath);
+
+  return actualPath;
 }

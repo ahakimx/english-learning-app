@@ -12,14 +12,16 @@ import { uploadAudio } from './audioService';
 describe('audioService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUploadData.mockResolvedValue({ path: 'uploaded' });
+    mockUploadData.mockReturnValue({ result: Promise.resolve({ path: 'uploaded' }) });
   });
 
   it('uploads audio blob to correct S3 path', async () => {
+    const expectedKey = 'user-123/session-456/q1.webm';
+    mockUploadData.mockReturnValue({ result: Promise.resolve({ path: expectedKey }) });
     const blob = new Blob(['audio-data'], { type: 'audio/webm' });
     const key = await uploadAudio(blob, 'user-123', 'session-456', 'q1');
 
-    expect(key).toBe('user-123/session-456/q1.webm');
+    expect(key).toBe(expectedKey);
     expect(mockUploadData).toHaveBeenCalledWith({
       path: 'user-123/session-456/q1.webm',
       data: blob,
@@ -28,19 +30,23 @@ describe('audioService', () => {
   });
 
   it('uses audio/webm as default content type when blob type is empty', async () => {
+    const expectedKey = 'u1/s1/q1.webm';
+    mockUploadData.mockReturnValue({ result: Promise.resolve({ path: expectedKey }) });
     const blob = new Blob(['audio-data']);
     // Blob with no type has empty string
     const key = await uploadAudio(blob, 'u1', 's1', 'q1');
 
-    expect(key).toBe('u1/s1/q1.webm');
+    expect(key).toBe(expectedKey);
     const callArgs = mockUploadData.mock.calls[0][0];
     expect(callArgs.options.contentType).toBe('audio/webm');
   });
 
   it('returns correct key format with different inputs', async () => {
+    const expectedKey = 'abc/def/ghi.webm';
+    mockUploadData.mockReturnValue({ result: Promise.resolve({ path: expectedKey }) });
     const blob = new Blob(['data'], { type: 'audio/webm' });
     const key = await uploadAudio(blob, 'abc', 'def', 'ghi');
-    expect(key).toBe('abc/def/ghi.webm');
+    expect(key).toBe(expectedKey);
   });
 });
 
@@ -49,7 +55,7 @@ describe('audioService', () => {
 describe('Property 6: Upload audio menghasilkan S3 key yang valid', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUploadData.mockResolvedValue({ path: 'uploaded' });
+    mockUploadData.mockReturnValue({ result: Promise.resolve({ path: 'uploaded' }) });
   });
 
   it('should return a valid S3 key in format {userId}/{sessionId}/{questionId}.webm for any valid inputs', async () => {
@@ -59,7 +65,8 @@ describe('Property 6: Upload audio menghasilkan S3 key yang valid', () => {
         fc.stringMatching(/^[a-zA-Z0-9]+$/).filter(s => s.length > 0),
         fc.stringMatching(/^[a-zA-Z0-9]+$/).filter(s => s.length > 0),
         async (userId, sessionId, questionId) => {
-          mockUploadData.mockResolvedValue({ path: 'uploaded' });
+          const expectedKey = `${userId}/${sessionId}/${questionId}.webm`;
+          mockUploadData.mockReturnValue({ result: Promise.resolve({ path: expectedKey }) });
           const blob = new Blob(['audio-data'], { type: 'audio/webm' });
 
           const key = await uploadAudio(blob, userId, sessionId, questionId);

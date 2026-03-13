@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { chat } from '../../services/apiClient'
-import type { ChatResponse, SummaryReport as SummaryReportType } from '../../types'
+import type { ChatResponse, SummaryReport as SummaryReportType, SeniorityLevel, QuestionCategory, QuestionType } from '../../types'
 import JobPositionSelector from './JobPositionSelector'
 import InterviewSession from './InterviewSession'
 import SummaryReport from './SummaryReport'
@@ -16,19 +16,27 @@ export default function SpeakingModule() {
   const [currentQuestion, setCurrentQuestion] = useState<string | null>(null)
   const [selectedPosition, setSelectedPosition] = useState<string | null>(null)
   const [summaryReport, setSummaryReport] = useState<SummaryReportType | null>(null)
+  const [selectedSeniority, setSelectedSeniority] = useState<SeniorityLevel | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<QuestionCategory | null>(null)
+  const [currentQuestionType, setCurrentQuestionType] = useState<QuestionType | undefined>(undefined)
 
-  async function handleSelectPosition(position: string) {
+  async function handleSelectPosition(position: string, seniorityLevel: SeniorityLevel, questionCategory: QuestionCategory) {
     setPhase('loading')
     setError(null)
     setSelectedPosition(position)
+    setSelectedSeniority(seniorityLevel)
+    setSelectedCategory(questionCategory)
 
     try {
       const response: ChatResponse = await chat({
         action: 'start_session',
         jobPosition: position,
+        seniorityLevel,
+        questionCategory,
       })
       setSessionId(response.sessionId)
       setCurrentQuestion(response.content)
+      setCurrentQuestionType(response.questionType)
       setPhase('interview')
     } catch {
       setError('Gagal memulai sesi interview. Silakan coba lagi.')
@@ -46,6 +54,7 @@ export default function SpeakingModule() {
         sessionId,
       })
       setCurrentQuestion(response.content)
+      setCurrentQuestionType(response.questionType)
     } catch {
       setError('Gagal mendapatkan pertanyaan berikutnya. Silakan coba lagi.')
     }
@@ -74,7 +83,10 @@ export default function SpeakingModule() {
     setSessionId(null)
     setCurrentQuestion(null)
     setSelectedPosition(null)
+    setSelectedSeniority(null)
+    setSelectedCategory(null)
     setSummaryReport(null)
+    setCurrentQuestionType(undefined)
     setError(null)
   }
 
@@ -109,12 +121,15 @@ export default function SpeakingModule() {
           </div>
         )}
 
-        {phase === 'interview' && currentQuestion && sessionId && selectedPosition && (
+        {phase === 'interview' && currentQuestion && sessionId && selectedPosition && selectedSeniority && selectedCategory && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <InterviewSession
               sessionId={sessionId}
               jobPosition={selectedPosition}
+              seniorityLevel={selectedSeniority}
+              questionCategory={selectedCategory}
               currentQuestion={currentQuestion}
+              questionType={currentQuestionType}
               onNextQuestion={handleNextQuestion}
               onEndSession={handleEndSession}
             />

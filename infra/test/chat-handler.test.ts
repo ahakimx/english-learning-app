@@ -549,16 +549,16 @@ describe('Lambda /chat handler', () => {
       expect(putCall.Item.sessionId).toMatch(uuidRegex);
     });
 
-    test('session item has questions array with first question', async () => {
+    test('session item has questions array with introduction question', async () => {
       const { PutCommand } = require('@aws-sdk/lib-dynamodb');
-      const event = eventWithBody({ action: 'start_session', jobPosition: 'Product Manager' });
+      const event = eventWithBody({ action: 'start_session', jobPosition: 'Product Manager', seniorityLevel: 'mid' });
       await handler(event);
 
       const putCall = PutCommand.mock.calls[0][0];
       expect(putCall.Item.questions).toHaveLength(1);
       expect(putCall.Item.questions[0]).toHaveProperty('questionId');
       expect(putCall.Item.questions[0]).toHaveProperty('questionText');
-      expect(putCall.Item.questions[0].questionText).toBe('Tell me about your experience with software development.');
+      expect(putCall.Item.questions[0].questionType).toBe('introduction');
     });
 
     test('session item has ISO 8601 timestamps', async () => {
@@ -571,42 +571,57 @@ describe('Lambda /chat handler', () => {
       expect(new Date(putCall.Item.updatedAt).toISOString()).toBe(putCall.Item.updatedAt);
     });
 
-    test('calls Bedrock with job position in prompt', async () => {
+    test('does not call Bedrock for start_session', async () => {
       const { InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
       const event = eventWithBody({ action: 'start_session', jobPosition: 'Marketing Manager' });
       await handler(event);
 
-      expect(InvokeModelCommand).toHaveBeenCalledTimes(1);
-      const bedrockCall = InvokeModelCommand.mock.calls[0][0];
-      expect(bedrockCall.modelId).toBe('anthropic.claude-3-haiku-20240307-v1:0');
-      const body = JSON.parse(bedrockCall.body);
-      expect(body.messages[0].content).toContain('Marketing Manager');
+      expect(InvokeModelCommand).not.toHaveBeenCalled();
     });
 
-    test('returns 500 when Bedrock call fails', async () => {
-      mockSend.mockImplementation((command: { _type?: string }) => {
-        if (command._type === 'InvokeModelCommand') {
-          return Promise.reject(new Error('Bedrock service error'));
-        }
-        return Promise.resolve({});
-      });
-
-      const event = eventWithBody({ action: 'start_session', jobPosition: 'Software Engineer' });
+    test('returns introduction question for junior seniority', async () => {
+      const event = eventWithBody({ action: 'start_session', jobPosition: 'Software Engineer', seniorityLevel: 'junior' });
       const result = await handler(event);
-      expect(result.statusCode).toBe(500);
       const body = JSON.parse(result.body);
-      expect(body.error).toBe('Internal Server Error');
+      expect(body.questionType).toBe('introduction');
+      expect(body.content).toContain('educational background');
+    });
+
+    test('returns introduction question for mid seniority', async () => {
+      const event = eventWithBody({ action: 'start_session', jobPosition: 'Software Engineer', seniorityLevel: 'mid' });
+      const result = await handler(event);
+      const body = JSON.parse(result.body);
+      expect(body.questionType).toBe('introduction');
+      expect(body.content).toContain('professional experience');
+    });
+
+    test('returns introduction question for senior seniority', async () => {
+      const event = eventWithBody({ action: 'start_session', jobPosition: 'Software Engineer', seniorityLevel: 'senior' });
+      const result = await handler(event);
+      const body = JSON.parse(result.body);
+      expect(body.questionType).toBe('introduction');
+      expect(body.content).toContain('career journey');
+    });
+
+    test('returns introduction question for lead seniority', async () => {
+      const event = eventWithBody({ action: 'start_session', jobPosition: 'Software Engineer', seniorityLevel: 'lead' });
+      const result = await handler(event);
+      const body = JSON.parse(result.body);
+      expect(body.questionType).toBe('introduction');
+      expect(body.content).toContain('leading teams');
+    });
+
+    test('stores questionType introduction in DynamoDB', async () => {
+      const { PutCommand } = require('@aws-sdk/lib-dynamodb');
+      const event = eventWithBody({ action: 'start_session', jobPosition: 'Data Analyst', seniorityLevel: 'senior' });
+      await handler(event);
+
+      const putCall = PutCommand.mock.calls[0][0];
+      expect(putCall.Item.questions[0].questionType).toBe('introduction');
     });
 
     test('returns 500 when DynamoDB put fails', async () => {
-      mockSend.mockImplementation((command: { _type?: string }) => {
-        if (command._type === 'InvokeModelCommand') {
-          return Promise.resolve({
-            body: new TextEncoder().encode(
-              JSON.stringify({ content: [{ text: 'A question' }] })
-            ),
-          });
-        }
+      mockSend.mockImplementation(() => {
         return Promise.reject(new Error('DynamoDB error'));
       });
 
@@ -623,6 +638,19 @@ describe('Lambda /chat handler', () => {
 
       const putCall = PutCommand.mock.calls[0][0];
       expect(responseBody.sessionId).toBe(putCall.Item.sessionId);
+    });
+
+    test('defaults to mid seniority when not provided', async () => {
+      const { PutCommand } = require('@aws-sdk/lib-dynamodb');
+      const event = eventWithBody({ action: 'start_session', jobPosition: 'Software Engineer' });
+      const result = await handler(event);
+      const body = JSON.parse(result.body);
+
+      expect(body.questionType).toBe('introduction');
+      expect(body.content).toContain('professional experience'); // mid template
+
+      const putCall = PutCommand.mock.calls[0][0];
+      expect(putCall.Item.seniorityLevel).toBe('mid');
     });
   });
 
@@ -970,6 +998,219 @@ describe('Lambda /chat handler', () => {
       const event = eventWithBody({ action: 'next_question', sessionId: 'test-session-id' });
       const result = await handler(event);
       expect(result.statusCode).toBe(500);
+    });
+
+    test('returns questionType contextual in response', async () => {
+      setupNextQuestionMocks();
+      const event = eventWithBody({ action: 'next_question', sessionId: 'test-session-id' });
+      const result = await handler(event);
+      const body = JSON.parse(result.body);
+      expect(body.questionType).toBe('contextual');
+    });
+
+    test('stores questionType contextual in DynamoDB update', async () => {
+      setupNextQuestionMocks();
+      const { UpdateCommand } = require('@aws-sdk/lib-dynamodb');
+      const event = eventWithBody({ action: 'next_question', sessionId: 'test-session-id' });
+      await handler(event);
+
+      const updateCall = UpdateCommand.mock.calls[0][0];
+      const newQuestion = updateCall.ExpressionAttributeValues[':newQuestion'];
+      expect(newQuestion[0].questionType).toBe('contextual');
+    });
+
+    test('uses contextual path with transcription available', async () => {
+      const sessionWithTranscription = {
+        userId: 'test-user-id-123',
+        sessionId: 'test-session-id',
+        jobPosition: 'Software Engineer',
+        seniorityLevel: 'mid',
+        questionCategory: 'general',
+        questions: [
+          { questionId: 'q1', questionText: 'Tell me about yourself', transcription: 'I am a developer with 5 years experience' },
+        ],
+      };
+      mockSend.mockImplementation((command: { _type?: string }) => {
+        if (command._type === 'GetCommand') {
+          return Promise.resolve({ Item: sessionWithTranscription });
+        }
+        if (command._type === 'InvokeModelCommand') {
+          return Promise.resolve({
+            body: new TextEncoder().encode(JSON.stringify({ content: [{ text: 'Follow-up question' }] })),
+          });
+        }
+        return Promise.resolve({});
+      });
+
+      const { InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
+      const event = eventWithBody({ action: 'next_question', sessionId: 'test-session-id' });
+      const result = await handler(event);
+
+      const bedrockCall = InvokeModelCommand.mock.calls[0][0];
+      const bedrockBody = JSON.parse(bedrockCall.body);
+      expect(bedrockBody.messages[0].content).toContain('I am a developer with 5 years experience');
+
+      const body = JSON.parse(result.body);
+      expect(body.questionType).toBe('contextual');
+      expect(body.content).toBe('Follow-up question');
+    });
+
+    test('uses contextual path with no transcription (general fallback)', async () => {
+      const sessionNoTranscription = {
+        userId: 'test-user-id-123',
+        sessionId: 'test-session-id',
+        jobPosition: 'Data Analyst',
+        seniorityLevel: 'senior',
+        questionCategory: 'general',
+        questions: [
+          { questionId: 'q1', questionText: 'Tell me about yourself' },
+        ],
+      };
+      mockSend.mockImplementation((command: { _type?: string }) => {
+        if (command._type === 'GetCommand') {
+          return Promise.resolve({ Item: sessionNoTranscription });
+        }
+        if (command._type === 'InvokeModelCommand') {
+          return Promise.resolve({
+            body: new TextEncoder().encode(JSON.stringify({ content: [{ text: 'General question' }] })),
+          });
+        }
+        return Promise.resolve({});
+      });
+
+      const { InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
+      const event = eventWithBody({ action: 'next_question', sessionId: 'test-session-id' });
+      const result = await handler(event);
+
+      const bedrockCall = InvokeModelCommand.mock.calls[0][0];
+      const bedrockBody = JSON.parse(bedrockCall.body);
+      const prompt = bedrockBody.messages[0].content;
+      expect(prompt).toContain('Data Analyst');
+      expect(prompt).toContain('senior');
+
+      const body = JSON.parse(result.body);
+      expect(body.questionType).toBe('contextual');
+    });
+
+    test('uses contextual path with empty last transcription (fallback to earlier)', async () => {
+      const sessionEmptyLastTranscription = {
+        userId: 'test-user-id-123',
+        sessionId: 'test-session-id',
+        jobPosition: 'Product Manager',
+        seniorityLevel: 'mid',
+        questionCategory: 'general',
+        questions: [
+          { questionId: 'q1', questionText: 'Tell me about yourself', transcription: 'I manage products' },
+          { questionId: 'q2', questionText: 'Describe your experience', transcription: '' },
+        ],
+      };
+      mockSend.mockImplementation((command: { _type?: string }) => {
+        if (command._type === 'GetCommand') {
+          return Promise.resolve({ Item: sessionEmptyLastTranscription });
+        }
+        if (command._type === 'InvokeModelCommand') {
+          return Promise.resolve({
+            body: new TextEncoder().encode(JSON.stringify({ content: [{ text: 'Fallback question' }] })),
+          });
+        }
+        return Promise.resolve({});
+      });
+
+      const { InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
+      const event = eventWithBody({ action: 'next_question', sessionId: 'test-session-id' });
+      const result = await handler(event);
+
+      const bedrockCall = InvokeModelCommand.mock.calls[0][0];
+      const bedrockBody = JSON.parse(bedrockCall.body);
+      expect(bedrockBody.messages[0].content).toContain('I manage products');
+
+      const body = JSON.parse(result.body);
+      expect(body.questionType).toBe('contextual');
+    });
+  });
+
+  // --- determineQuestionType unit tests ---
+  describe('determineQuestionType', () => {
+    test('returns contextual for empty array', () => {
+      const { determineQuestionType } = require('../lambda/chat/index');
+      expect(determineQuestionType([])).toBe('contextual');
+    });
+
+    test('returns contextual for array with 1 question', () => {
+      const { determineQuestionType } = require('../lambda/chat/index');
+      expect(determineQuestionType([{ questionType: 'introduction' }])).toBe('contextual');
+    });
+
+    test('returns contextual for array with 10 questions', () => {
+      const { determineQuestionType } = require('../lambda/chat/index');
+      const questions = Array.from({ length: 10 }, (_, i) => ({
+        questionType: i === 0 ? 'introduction' : 'contextual',
+        transcription: `Answer ${i}`,
+      }));
+      expect(determineQuestionType(questions)).toBe('contextual');
+    });
+
+    test('returns contextual for questions with legacy random type', () => {
+      const { determineQuestionType } = require('../lambda/chat/index');
+      expect(determineQuestionType([{ questionType: 'random' }])).toBe('contextual');
+    });
+  });
+
+  // --- buildContextualPrompt unit tests ---
+  describe('buildContextualPrompt', () => {
+    test('includes exactly 3 Q&A pairs when session has 5 transcribed questions', () => {
+      const { buildContextualPrompt } = require('../lambda/chat/index');
+      const questions = Array.from({ length: 5 }, (_, i) => ({
+        questionText: `Question ${i + 1}`,
+        transcription: `Answer ${i + 1}`,
+      }));
+      const previousTexts = questions.map((q: { questionText: string }) => q.questionText);
+      const prompt = buildContextualPrompt('Software Engineer', 'mid', 'general', questions, previousTexts);
+
+      // Should contain the 3 most recent (Q3, Q4, Q5)
+      expect(prompt).toContain('Answer 5');
+      expect(prompt).toContain('Answer 4');
+      expect(prompt).toContain('Answer 3');
+      // Should NOT contain older ones
+      expect(prompt).not.toContain('Answer 1');
+      expect(prompt).not.toContain('Answer 2');
+    });
+
+    test('includes 1 Q&A pair when session has 1 transcribed question', () => {
+      const { buildContextualPrompt } = require('../lambda/chat/index');
+      const questions = [{ questionText: 'Tell me about yourself', transcription: 'I am a developer' }];
+      const previousTexts = ['Tell me about yourself'];
+      const prompt = buildContextualPrompt('Software Engineer', 'mid', 'general', questions, previousTexts);
+
+      expect(prompt).toContain('I am a developer');
+      expect(prompt).toContain('Tell me about yourself');
+    });
+
+    test('produces general prompt when no questions have transcriptions', () => {
+      const { buildContextualPrompt } = require('../lambda/chat/index');
+      const questions = [
+        { questionText: 'Tell me about yourself' },
+        { questionText: 'Describe your experience' },
+      ];
+      const previousTexts = questions.map((q: { questionText: string }) => q.questionText);
+      const prompt = buildContextualPrompt('Data Analyst', 'senior', 'general', questions, previousTexts);
+
+      expect(prompt).toContain('Data Analyst');
+      expect(prompt).toContain('senior');
+      // Should not contain Q&A pair markers since there are no transcriptions
+      expect(prompt).not.toContain('Candidate');
+    });
+
+    test('falls back to earlier transcription when last transcription is empty', () => {
+      const { buildContextualPrompt } = require('../lambda/chat/index');
+      const questions = [
+        { questionText: 'Tell me about yourself', transcription: 'I manage products and teams' },
+        { questionText: 'Describe a challenge', transcription: '' },
+      ];
+      const previousTexts = questions.map((q: { questionText: string }) => q.questionText);
+      const prompt = buildContextualPrompt('Product Manager', 'mid', 'general', questions, previousTexts);
+
+      expect(prompt).toContain('I manage products and teams');
     });
   });
 

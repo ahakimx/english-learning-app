@@ -224,7 +224,7 @@ cd ..
 
 ## Deploy ke AWS
 
-### Deploy Semua Stack
+### Deploy Semua Stack (Backend + Frontend)
 
 ```bash
 cd infra
@@ -245,7 +245,7 @@ npx cdk deploy EnglishLearningApp-StorageStack
 # 3. API (depends on Auth + Storage)
 npx cdk deploy EnglishLearningApp-ApiStack
 
-# 4. Frontend (independent)
+# 4. Frontend (depends on Auth + Storage + API)
 npx cdk deploy EnglishLearningApp-FrontendStack
 ```
 
@@ -256,8 +256,189 @@ Setelah deploy, catat output berikut dari terminal:
 ```
 EnglishLearningApp-AuthStack.UserPoolId = us-east-1_xxxxxxxxx
 EnglishLearningApp-AuthStack.UserPoolClientId = xxxxxxxxxxxxxxxxxxxxxxxxxx
+EnglishLearningApp-AuthStack.IdentityPoolId = us-east-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 EnglishLearningApp-ApiStack.ApiUrl = https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/
+EnglishLearningApp-FrontendStack.AmplifyAppId = dxxxxxxxxxx
+EnglishLearningApp-FrontendStack.AmplifyAppDefaultDomain = dxxxxxxxxxx.amplifyapp.com
 ```
+
+---
+
+## Deploy Frontend ke Amplify Hosting
+
+Jika backend sudah di-deploy dan kamu hanya perlu deploy frontend, ikuti langkah berikut.
+
+### Opsi A: Deploy via Amplify Console + GitHub (Rekomendasi)
+
+Cara ini paling mudah dan mendukung auto-deploy setiap `git push`.
+
+#### 1. Deploy FrontendStack via CDK
+
+```bash
+cd infra
+npx cdk deploy EnglishLearningApp-FrontendStack
+```
+
+Catat `AmplifyAppId` dari output.
+
+#### 2. Push code ke GitHub
+
+```bash
+git add .
+git commit -m "ready for amplify deploy"
+git push origin main
+```
+
+#### 3. Connect repo di Amplify Console
+
+1. Buka [AWS Amplify Console](https://us-east-1.console.aws.amazon.com/amplify/apps)
+2. Cari app **EnglishLearningApp** (sudah dibuat oleh CDK)
+3. Klik app → **Hosting** → **Deploy**
+4. Pilih **GitHub** sebagai source provider → Authorize
+5. Pilih repository dan branch `main`
+6. Review build settings (sudah otomatis dari CDK buildSpec):
+   ```yaml
+   version: 1
+   frontend:
+     phases:
+       preBuild:
+         commands:
+           - npm ci
+       build:
+         commands:
+           - npm run build
+     artifacts:
+       baseDirectory: dist
+       files:
+         - "**/*"
+     cache:
+       paths:
+         - node_modules/**/*
+   ```
+7. Klik **Save and deploy**
+
+#### 4. Tunggu build selesai
+
+Amplify akan clone repo, install dependencies, build, dan deploy. Proses ini biasanya 2-4 menit.
+
+#### 5. Akses aplikasi
+
+Setelah build selesai, app bisa diakses di:
+```
+https://main.dxxxxxxxxxx.amplifyapp.com
+```
+
+URL ini juga bisa dilihat di Amplify Console.
+
+> Setiap kali kamu `git push` ke branch `main`, Amplify otomatis rebuild dan deploy.
+
+### Opsi B: Manual Deploy dari Lokal (Tanpa GitHub)
+
+Jika belum push ke GitHub atau ingin deploy langsung dari lokal.
+
+#### 1. Build frontend
+
+```bash
+npm run build
+```
+
+#### 2. Deploy FrontendStack (jika belum)
+
+```bash
+cd infra
+npx cdk deploy EnglishLearningApp-FrontendStack
+```
+
+#### 3. Ambil Amplify App ID
+
+```bash
+aws amplify list-apps --region us-east-1 --query "apps[?name=='EnglishLearningApp'].appId" --output text
+```
+
+#### 4. Buat deployment dan upload
+
+```bash
+# Buat deployment job
+aws amplify create-deployment \
+  --app-id <APP_ID> \
+  --branch-name main \
+  --region us-east-1
+
+# Output: jobId dan zipUploadUrl
+```
+
+#### 5. Zip dan upload build artifacts
+
+```bash
+# Zip folder dist
+cd dist
+Compress-Archive -Path * -DestinationPath ../deploy.zip
+cd ..
+
+# Upload via presigned URL (gunakan zipUploadUrl dari step 4)
+curl -T deploy.zip "<zipUploadUrl>"
+```
+
+#### 6. Start deployment
+
+```bash
+aws amplify start-deployment \
+  --app-id <APP_ID> \
+  --branch-name main \
+  --job-id <JOB_ID> \
+  --region us-east-1
+```
+
+#### 7. Cek status
+
+```bash
+aws amplify get-job \
+  --app-id <APP_ID> \
+  --branch-name main \
+  --job-id <JOB_ID> \
+  --region us-east-1
+```
+
+### Environment Variables
+
+FrontendStack sudah otomatis meng-inject environment variables dari stack lain:
+
+| Variable | Source | Deskripsi |
+|----------|--------|-----------|
+| `VITE_API_URL` | ApiStack output | URL API Gateway |
+| `VITE_USER_POOL_ID` | AuthStack output | Cognito User Pool ID |
+| `VITE_USER_POOL_CLIENT_ID` | AuthStack output | Cognito App Client ID |
+| `VITE_IDENTITY_POOL_ID` | AuthStack output | Cognito Identity Pool ID |
+| `VITE_AUDIO_BUCKET_NAME` | StorageStack output | S3 bucket untuk audio |
+| `VITE_AWS_REGION` | CDK region | AWS Region |
+
+Jika perlu update manual, bisa via Amplify Console:
+1. Buka app di Amplify Console
+2. **Hosting** → **Environment variables**
+3. Edit nilai yang perlu diubah
+4. Redeploy branch
+
+### Custom Domain (Opsional)
+
+Untuk menggunakan domain sendiri:
+
+1. Buka app di Amplify Console
+2. **Hosting** → **Custom domains**
+3. Klik **Add domain**
+4. Masukkan domain (misal: `belajar-interview.com`)
+5. Amplify akan otomatis provision SSL certificate
+6. Update DNS records sesuai instruksi Amplify
+
+### Troubleshooting Amplify Deploy
+
+| Masalah | Solusi |
+|---------|--------|
+| Build gagal: `npm ci` error | Pastikan `package-lock.json` sudah committed ke repo |
+| Build gagal: TypeScript error | Jalankan `npm run build` di lokal dulu untuk cek error |
+| Halaman blank setelah deploy | Cek SPA rewrite rule di Amplify Console → Rewrites and redirects |
+| Environment variables kosong | Pastikan FrontendStack sudah di-deploy ulang setelah backend stack berubah |
+| 403/404 saat akses route | SPA rewrite rule sudah di-setup di CDK, tapi cek di Console jika masih error |
+| CORS error | Pastikan API Gateway CORS sudah mengizinkan domain Amplify |
 
 ---
 

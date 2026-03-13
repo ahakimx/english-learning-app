@@ -79,7 +79,7 @@ describe('RegisterForm', () => {
     })
   })
 
-  it('shows success message after successful registration', async () => {
+  it('shows verification step after successful registration', async () => {
     mockRegister.mockResolvedValue({ isSignUpComplete: false })
     renderRegisterForm()
 
@@ -90,7 +90,10 @@ describe('RegisterForm', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Daftar' }))
 
     await waitFor(() => {
-      expect(screen.getByText('Registrasi Berhasil')).toBeInTheDocument()
+      expect(screen.getByText('Verifikasi Email')).toBeInTheDocument()
     })
+    expect(screen.getByText(/new@test.com/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Kode Verifikasi')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Verifikasi' })).toBeInTheDocument()
   })
 })

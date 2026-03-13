@@ -100,7 +100,7 @@ describe('Integration: Auth flow (register → login → protected route → log
     fireEvent.change(screen.getByLabelText('Konfirmasi Password'), { target: { value: 'SecurePass1!' } })
     fireEvent.click(screen.getByRole('button', { name: 'Daftar' }))
 
-    expect(await screen.findByText('Registrasi Berhasil')).toBeInTheDocument()
+    expect(await screen.findByText('Verifikasi Email')).toBeInTheDocument()
     expect(mockRegister).toHaveBeenCalledWith('new@example.com', 'SecurePass1!')
   })
 
@@ -162,7 +162,7 @@ describe('Integration: Speaking flow (start session → feedback → summary)', 
     mockSpeak.mockResolvedValue({ audioData: 'bW9jaw==' })
   })
 
-  it('selects position and starts interview session with question displayed', async () => {
+  it('selects position with seniority and category, starts interview session with question displayed', async () => {
     mockChat.mockResolvedValueOnce({
       sessionId: 'sess-s1',
       type: 'question',
@@ -172,19 +172,24 @@ describe('Integration: Speaking flow (start session → feedback → summary)', 
     renderApp('/speaking')
     expect(await screen.findByText('Pilih Posisi Pekerjaan')).toBeInTheDocument()
 
+    // Multi-step selection: position → seniority → category
     fireEvent.click(screen.getByLabelText('Pilih posisi Software Engineer'))
+    fireEvent.click(screen.getByLabelText('Pilih tingkat Senior'))
+    fireEvent.click(screen.getByLabelText('Pilih kategori Teknis'))
 
     await waitFor(() => {
       expect(mockChat).toHaveBeenCalledWith({
         action: 'start_session',
         jobPosition: 'Software Engineer',
+        seniorityLevel: 'senior',
+        questionCategory: 'technical',
       })
     })
 
     expect(await screen.findByTestId('interview-question')).toHaveTextContent(
       'Tell me about your experience with software development.',
     )
-    expect(screen.getByText('Posisi: Software Engineer')).toBeInTheDocument()
+    expect(screen.getByText(/Posisi: Software Engineer/)).toBeInTheDocument()
   })
 
   it('shows error and returns to selection when start session fails', async () => {
@@ -192,7 +197,11 @@ describe('Integration: Speaking flow (start session → feedback → summary)', 
 
     renderApp('/speaking')
     await screen.findByText('Pilih Posisi Pekerjaan')
+
+    // Multi-step selection: position → seniority → category
     fireEvent.click(screen.getByLabelText('Pilih posisi Product Manager'))
+    fireEvent.click(screen.getByLabelText('Pilih tingkat Menengah'))
+    fireEvent.click(screen.getByLabelText('Pilih kategori Umum'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Gagal memulai sesi interview. Silakan coba lagi.',
@@ -259,11 +268,11 @@ describe('Integration: Grammar flow (select topic → answer quiz → view expla
     fireEvent.click(screen.getByTestId('option-1')) // 'goes'
 
     await waitFor(() => {
-      expect(mockChat).toHaveBeenCalledWith({
+      expect(mockChat).toHaveBeenCalledWith(expect.objectContaining({
         action: 'grammar_explain',
         grammarTopic: 'tenses',
         selectedAnswer: 'goes',
-      })
+      }))
     })
 
     // Explanation should appear

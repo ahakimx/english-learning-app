@@ -68,6 +68,8 @@ vi.stubGlobal('Audio', vi.fn().mockImplementation(() => ({
 const defaultProps = {
   sessionId: 'sess-1',
   jobPosition: 'Software Engineer',
+  seniorityLevel: 'mid' as const,
+  questionCategory: 'general' as const,
   currentQuestion: 'Tell me about yourself.',
   onEndSession: vi.fn(),
   onNextQuestion: vi.fn(),
@@ -312,5 +314,27 @@ describe('InterviewSession', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Gagal menganalisis jawaban');
     });
     expect(screen.queryByText('Coba Lagi')).not.toBeInTheDocument();
+  });
+
+  describe('session header seniority and category labels', () => {
+    it('renders seniority "senior" as "Senior" in Indonesian label', () => {
+      renderSession({ ...defaultProps, seniorityLevel: 'senior' });
+      expect(screen.getByTestId('session-seniority')).toHaveTextContent('Tingkat: Senior');
+    });
+
+    it('renders seniority "mid" as "Menengah" in Indonesian label', () => {
+      renderSession({ ...defaultProps, seniorityLevel: 'mid' });
+      expect(screen.getByTestId('session-seniority')).toHaveTextContent('Tingkat: Menengah');
+    });
+
+    it('renders category "general" as "Umum" in Indonesian label', () => {
+      renderSession({ ...defaultProps, questionCategory: 'general' });
+      expect(screen.getByTestId('session-category')).toHaveTextContent('Kategori: Umum');
+    });
+
+    it('renders category "technical" as "Teknis" in Indonesian label', () => {
+      renderSession({ ...defaultProps, questionCategory: 'technical' });
+      expect(screen.getByTestId('session-category')).toHaveTextContent('Kategori: Teknis');
+    });
   });
 });
