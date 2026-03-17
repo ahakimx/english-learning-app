@@ -13,6 +13,8 @@ export interface ChatRequest {
     | 'analyze_answer'
     | 'next_question'
     | 'end_session'
+    | 'resume_session'
+    | 'abandon_session'
     | 'grammar_quiz'
     | 'grammar_explain'
     | 'writing_prompt'
@@ -36,8 +38,12 @@ export interface ChatResponse {
     | 'quiz'
     | 'explanation'
     | 'writing_prompt'
-    | 'writing_review';
+    | 'writing_review'
+    | 'no_active_session'
+    | 'session_resumed'
+    | 'session_abandoned';
   content: string;
+  sessionData?: SessionData;
   feedbackReport?: FeedbackReport;
   summaryReport?: SummaryReport;
   quizData?: QuizData;
@@ -128,4 +134,23 @@ export interface ProgressData {
     averageScore: number;
     scoreHistory: Array<{ date: string; score: number }>;
   };
+}
+
+export interface SessionData {
+  sessionId: string;
+  jobPosition: string;
+  seniorityLevel: SeniorityLevel;
+  questionCategory: QuestionCategory;
+  questions: SessionQuestion[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionQuestion {
+  questionId: string;
+  questionText: string;
+  questionType?: QuestionType;
+  transcription?: string;
+  feedback?: FeedbackReport;
+  answeredAt?: string;
 }

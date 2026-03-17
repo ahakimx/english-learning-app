@@ -6,7 +6,12 @@ import { JOB_POSITIONS, SENIORITY_LABELS, CATEGORY_LABELS } from './JobPositionS
 import type { SeniorityLevel, QuestionCategory } from '../../types'
 
 vi.mock('../../services/apiClient', () => ({
-  chat: vi.fn().mockResolvedValue({ sessionId: 'test-session', type: 'question', content: 'Test question?' }),
+  chat: vi.fn().mockImplementation((args: Record<string, unknown>) => {
+    if (args.action === 'resume_session') {
+      return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+    }
+    return Promise.resolve({ sessionId: 'test-session', type: 'question', content: 'Test question?' })
+  }),
   speak: vi.fn().mockResolvedValue({ audioData: '' }),
   transcribe: vi.fn(),
   TimeoutError: class TimeoutError extends Error {},
@@ -46,6 +51,9 @@ describe('Feature: interview-position-enhancement, Property 5: Start session req
         async (position, seniority, category) => {
           render(<SpeakingModule />)
 
+          // Wait for checking phase to complete
+          await screen.findByText('Pilih Posisi Pekerjaan')
+
           // Step 1: Select position
           const positionButton = screen.getByLabelText(`Pilih posisi ${position.title}`)
           fireEvent.click(positionButton)
@@ -60,13 +68,19 @@ describe('Feature: interview-position-enhancement, Property 5: Start session req
           const categoryButton = screen.getByLabelText(`Pilih kategori ${categoryLabel}`)
           fireEvent.click(categoryButton)
 
-          // Wait for the async chat call
+          // Wait for the async chat call (start_session, not resume_session)
           await waitFor(() => {
-            expect(chat).toHaveBeenCalled()
+            const startCalls = vi.mocked(chat).mock.calls.filter(
+              (c) => (c[0] as Record<string, unknown>).action === 'start_session'
+            )
+            expect(startCalls.length).toBeGreaterThan(0)
           })
 
           // Verify the ChatRequest contains all parameters
-          const callArgs = vi.mocked(chat).mock.calls[0][0]
+          const startCall = vi.mocked(chat).mock.calls.find(
+            (c) => (c[0] as Record<string, unknown>).action === 'start_session'
+          )!
+          const callArgs = startCall[0]
           expect(callArgs.action).toBe('start_session')
           expect(callArgs.jobPosition).toBe(position.title)
           expect(callArgs.seniorityLevel).toBe(seniority)

@@ -163,10 +163,15 @@ describe('Integration: Speaking flow (start session → feedback → summary)', 
   })
 
   it('selects position with seniority and category, starts interview session with question displayed', async () => {
-    mockChat.mockResolvedValueOnce({
-      sessionId: 'sess-s1',
-      type: 'question',
-      content: 'Tell me about your experience with software development.',
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      return Promise.resolve({
+        sessionId: 'sess-s1',
+        type: 'question',
+        content: 'Tell me about your experience with software development.',
+      })
     })
 
     renderApp('/speaking')
@@ -193,7 +198,12 @@ describe('Integration: Speaking flow (start session → feedback → summary)', 
   })
 
   it('shows error and returns to selection when start session fails', async () => {
-    mockChat.mockRejectedValueOnce(new Error('Network error'))
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      return Promise.reject(new Error('Network error'))
+    })
 
     renderApp('/speaking')
     await screen.findByText('Pilih Posisi Pekerjaan')

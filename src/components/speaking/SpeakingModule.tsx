@@ -1,16 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { chat } from '../../services/apiClient'
-import type { ChatResponse, SummaryReport as SummaryReportType, SeniorityLevel, QuestionCategory, QuestionType } from '../../types'
+import type { ChatResponse, SummaryReport as SummaryReportType, SeniorityLevel, QuestionCategory, QuestionType, SessionData } from '../../types'
 import JobPositionSelector from './JobPositionSelector'
 import InterviewSession from './InterviewSession'
 import SummaryReport from './SummaryReport'
+import ResumePrompt from './ResumePrompt'
 
-type Phase = 'select' | 'loading' | 'interview' | 'summary'
+type Phase = 'checking' | 'resume-prompt' | 'select' | 'loading' | 'interview' | 'summary'
 
 export default function SpeakingModule() {
   const navigate = useNavigate()
-  const [phase, setPhase] = useState<Phase>('select')
+  const [phase, setPhase] = useState<Phase>('checking')
   const [error, setError] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [currentQuestion, setCurrentQuestion] = useState<string | null>(null)
@@ -19,6 +20,25 @@ export default function SpeakingModule() {
   const [selectedSeniority, setSelectedSeniority] = useState<SeniorityLevel | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<QuestionCategory | null>(null)
   const [currentQuestionType, setCurrentQuestionType] = useState<QuestionType | undefined>(undefined)
+  const [resumeSessionData, setResumeSessionData] = useState<SessionData | null>(null)
+  const [isAbandoning, setIsAbandoning] = useState(false)
+
+  useEffect(() => {
+    async function checkActiveSession() {
+      try {
+        const response = await chat({ action: 'resume_session' })
+        if (response.type === 'session_resumed' && response.sessionData) {
+          setResumeSessionData(response.sessionData)
+          setPhase('resume-prompt')
+        } else {
+          setPhase('select')
+        }
+      } catch {
+        setPhase('select')
+      }
+    }
+    checkActiveSession()
+  }, [])
 
   async function handleSelectPosition(position: string, seniorityLevel: SeniorityLevel, questionCategory: QuestionCategory) {
     setPhase('loading')
@@ -78,6 +98,77 @@ export default function SpeakingModule() {
     }
   }
 
+  async function handleResumeSession() {
+    if (!resumeSessionData) return
+
+    setSessionId(resumeSessionData.sessionId)
+    setSelectedPosition(resumeSessionData.jobPosition)
+    setSelectedSeniority(resumeSessionData.seniorityLevel)
+    setSelectedCategory(resumeSessionData.questionCategory)
+    setError(null)
+
+    const questions = resumeSessionData.questions
+
+    if (questions.length === 0) {
+      setPhase('select')
+      return
+    }
+
+    const lastQuestion = questions[questions.length - 1]
+
+    if (!lastQuestion.transcription) {
+      setCurrentQuestion(lastQuestion.questionText)
+      setCurrentQuestionType(lastQuestion.questionType)
+      setPhase('interview')
+    } else if (!lastQuestion.feedback) {
+      setPhase('loading')
+      try {
+        const response = await chat({
+          action: 'analyze_answer',
+          sessionId: resumeSessionData.sessionId,
+          transcription: lastQuestion.transcription,
+        })
+        setCurrentQuestion(lastQuestion.questionText)
+        setCurrentQuestionType(lastQuestion.questionType)
+        setPhase('interview')
+      } catch {
+        setError('Gagal menganalisis jawaban terakhir. Silakan coba lagi.')
+        setPhase('select')
+      }
+    } else {
+      setPhase('loading')
+      try {
+        const response = await chat({
+          action: 'next_question',
+          sessionId: resumeSessionData.sessionId,
+        })
+        setCurrentQuestion(response.content)
+        setCurrentQuestionType(response.questionType)
+        setPhase('interview')
+      } catch {
+        setError('Gagal mendapatkan pertanyaan berikutnya. Silakan coba lagi.')
+        setPhase('select')
+      }
+    }
+  }
+
+  async function handleAbandonAndStartNew() {
+    if (!resumeSessionData) return
+
+    setIsAbandoning(true)
+    try {
+      await chat({
+        action: 'abandon_session',
+        sessionId: resumeSessionData.sessionId,
+      })
+    } catch {
+      setError('Sesi lama tidak dapat ditutup, tetapi Anda dapat memulai sesi baru.')
+    }
+    setIsAbandoning(false)
+    setResumeSessionData(null)
+    setPhase('select')
+  }
+
   function handleNewSession() {
     setPhase('select')
     setSessionId(null)
@@ -87,6 +178,8 @@ export default function SpeakingModule() {
     setSelectedCategory(null)
     setSummaryReport(null)
     setCurrentQuestionType(undefined)
+    setResumeSessionData(null)
+    setIsAbandoning(false)
     setError(null)
   }
 
@@ -108,6 +201,22 @@ export default function SpeakingModule() {
           <div role="alert" className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
             {error}
           </div>
+        )}
+
+        {phase === 'checking' && (
+          <div className="flex flex-col items-center justify-center py-16" role="status" data-testid="checking-indicator">
+            <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-500 border-t-transparent mb-4" />
+            <p className="text-gray-600">Memeriksa sesi aktif...</p>
+          </div>
+        )}
+
+        {phase === 'resume-prompt' && resumeSessionData && (
+          <ResumePrompt
+            sessionData={resumeSessionData}
+            onResume={handleResumeSession}
+            onStartNew={handleAbandonAndStartNew}
+            isAbandoning={isAbandoning}
+          />
         )}
 
         {phase === 'select' && (

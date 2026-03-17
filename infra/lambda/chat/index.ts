@@ -1,8 +1,8 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { ChatRequest, ChatResponse, FeedbackReport, SummaryReport, QuizData, WritingReviewData, SeniorityLevel, QuestionCategory, QuestionType } from '../../lib/types';
+import { ChatRequest, ChatResponse, FeedbackReport, SummaryReport, QuizData, WritingReviewData, SeniorityLevel, QuestionCategory, QuestionType, SessionData } from '../../lib/types';
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
@@ -20,6 +20,8 @@ const VALID_ACTIONS: ChatRequest['action'][] = [
   'analyze_answer',
   'next_question',
   'end_session',
+  'resume_session',
+  'abandon_session',
   'grammar_quiz',
   'grammar_explain',
   'writing_prompt',
@@ -31,6 +33,8 @@ const REQUIRED_FIELDS: Record<ChatRequest['action'], (keyof ChatRequest)[]> = {
   analyze_answer: ['sessionId', 'transcription'],
   next_question: ['sessionId'],
   end_session: ['sessionId'],
+  resume_session: [],
+  abandon_session: ['sessionId'],
   grammar_quiz: ['grammarTopic'],
   grammar_explain: ['sessionId', 'selectedAnswer'],
   writing_prompt: ['writingType'],
@@ -38,6 +42,8 @@ const REQUIRED_FIELDS: Record<ChatRequest['action'], (keyof ChatRequest)[]> = {
 };
 
 const BEDROCK_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+
+const SESSION_EXPIRY_HOURS = 24;
 
 const VALID_SENIORITY_LEVELS: SeniorityLevel[] = ['junior', 'mid', 'senior', 'lead'];
 const VALID_QUESTION_CATEGORIES: QuestionCategory[] = ['general', 'technical'];
@@ -192,6 +198,39 @@ ${previousList}`;
 // --- Action handlers (stubs for tasks 5.2-5.4, 6.1-6.2) ---
 
 async function handleStartSession(userId: string, request: ChatRequest): Promise<ChatResponse> {
+  // Auto-abandon existing active speaking sessions (best-effort)
+  try {
+    const existingResult = await docClient.send(
+      new QueryCommand({
+        TableName: process.env.SESSIONS_TABLE_NAME,
+        KeyConditionExpression: 'userId = :uid',
+        FilterExpression: '#status = :active AND #type = :speaking',
+        ExpressionAttributeNames: { '#status': 'status', '#type': 'type' },
+        ExpressionAttributeValues: { ':uid': userId, ':active': 'active', ':speaking': 'speaking' },
+      })
+    );
+
+    const activeSessions = existingResult.Items ?? [];
+
+    for (const session of activeSessions) {
+      try {
+        await docClient.send(
+          new UpdateCommand({
+            TableName: process.env.SESSIONS_TABLE_NAME,
+            Key: { userId, sessionId: session.sessionId as string },
+            UpdateExpression: 'SET #status = :abandoned, updatedAt = :now',
+            ExpressionAttributeNames: { '#status': 'status' },
+            ExpressionAttributeValues: { ':abandoned': 'abandoned', ':now': new Date().toISOString() },
+          })
+        );
+      } catch (abandonError) {
+        console.error(`Failed to abandon session ${session.sessionId}:`, abandonError);
+      }
+    }
+  } catch (queryError) {
+    console.error('Failed to query existing active sessions:', queryError);
+  }
+
   const sessionId = crypto.randomUUID();
   const now = new Date().toISOString();
   const seniorityLevel: SeniorityLevel = request.seniorityLevel ?? 'mid';
@@ -228,6 +267,111 @@ async function handleStartSession(userId: string, request: ChatRequest): Promise
 }
 
 
+async function handleResumeSession(userId: string, _request: ChatRequest): Promise<ChatResponse> {
+  // Query DynamoDB for all sessions with this userId, filter status='active' AND type='speaking'
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: process.env.SESSIONS_TABLE_NAME,
+      KeyConditionExpression: 'userId = :uid',
+      FilterExpression: '#status = :active AND #type = :speaking',
+      ExpressionAttributeNames: {
+        '#status': 'status',
+        '#type': 'type',
+      },
+      ExpressionAttributeValues: {
+        ':uid': userId,
+        ':active': 'active',
+        ':speaking': 'speaking',
+      },
+    })
+  );
+
+  const activeSessions = result.Items ?? [];
+
+  // No active sessions found
+  if (activeSessions.length === 0) {
+    return { type: 'no_active_session', content: '', sessionId: '' };
+  }
+
+  // If multiple active sessions, sort by updatedAt descending and pick the most recent
+  activeSessions.sort((a, b) => {
+    const dateA = new Date(a.updatedAt as string).getTime();
+    const dateB = new Date(b.updatedAt as string).getTime();
+    return dateB - dateA;
+  });
+  const session = activeSessions[0];
+
+  // Check expiry: if updatedAt + 24h < now, mark as expired
+  const updatedAt = new Date(session.updatedAt as string).getTime();
+  const now = Date.now();
+  const expiryMs = SESSION_EXPIRY_HOURS * 60 * 60 * 1000;
+
+  if (now - updatedAt > expiryMs) {
+    // Update status to 'expired' in DynamoDB
+    await docClient.send(
+      new UpdateCommand({
+        TableName: process.env.SESSIONS_TABLE_NAME,
+        Key: { userId, sessionId: session.sessionId },
+        UpdateExpression: 'SET #status = :expired, updatedAt = :now',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: {
+          ':expired': 'expired',
+          ':now': new Date().toISOString(),
+        },
+      })
+    );
+    return { type: 'no_active_session', content: '', sessionId: '' };
+  }
+
+  // Build SessionData from the session record
+  const sessionData: SessionData = {
+    sessionId: session.sessionId as string,
+    jobPosition: session.jobPosition as string,
+    seniorityLevel: session.seniorityLevel as SeniorityLevel,
+    questionCategory: session.questionCategory as QuestionCategory,
+    questions: (session.questions as Array<Record<string, unknown>> ?? []).map((q) => ({
+      questionId: q.questionId as string,
+      questionText: q.questionText as string,
+      questionType: q.questionType as QuestionType | undefined,
+      transcription: q.transcription as string | undefined,
+      feedback: q.feedback as FeedbackReport | undefined,
+      answeredAt: q.answeredAt as string | undefined,
+    })),
+    createdAt: session.createdAt as string,
+    updatedAt: session.updatedAt as string,
+  };
+
+  return {
+    type: 'session_resumed',
+    sessionData,
+    sessionId: session.sessionId as string,
+    content: '',
+  };
+}
+
+
+async function handleAbandonSession(userId: string, request: ChatRequest): Promise<ChatResponse> {
+  const sessionId = request.sessionId!;
+  const now = new Date().toISOString();
+
+  await docClient.send(
+    new UpdateCommand({
+      TableName: process.env.SESSIONS_TABLE_NAME,
+      Key: { userId, sessionId },
+      UpdateExpression: 'SET #status = :abandoned, updatedAt = :now',
+      ConditionExpression: 'userId = :uid AND #status = :active',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: {
+        ':abandoned': 'abandoned',
+        ':active': 'active',
+        ':now': now,
+        ':uid': userId,
+      },
+    })
+  );
+
+  return { type: 'session_abandoned', content: '', sessionId };
+}
 
 
 async function handleAnalyzeAnswer(userId: string, request: ChatRequest): Promise<ChatResponse> {
@@ -901,6 +1045,10 @@ async function routeAction(userId: string, request: ChatRequest): Promise<ChatRe
   switch (request.action) {
     case 'start_session':
       return handleStartSession(userId, request);
+    case 'resume_session':
+      return handleResumeSession(userId, request);
+    case 'abandon_session':
+      return handleAbandonSession(userId, request);
     case 'analyze_answer':
       return handleAnalyzeAnswer(userId, request);
     case 'next_question':
@@ -915,6 +1063,8 @@ async function routeAction(userId: string, request: ChatRequest): Promise<ChatRe
       return handleWritingPrompt(userId, request);
     case 'writing_review':
       return handleWritingReview(userId, request);
+    default:
+      throw new Error(`Unhandled action: ${request.action}`);
   }
 }
 
@@ -960,4 +1110,4 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 };
 
 // Export for testing
-export { validateRequest, extractUserId, routeAction, determineQuestionType, buildContextualPrompt, VALID_ACTIONS, REQUIRED_FIELDS, AuthorizationError, INTRODUCTION_QUESTIONS };
+export { validateRequest, extractUserId, routeAction, determineQuestionType, buildContextualPrompt, VALID_ACTIONS, REQUIRED_FIELDS, AuthorizationError, INTRODUCTION_QUESTIONS, SESSION_EXPIRY_HOURS };

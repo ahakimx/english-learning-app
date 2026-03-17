@@ -18,6 +18,11 @@ vi.mock('../../services/apiClient', () => ({
   TimeoutError: class TimeoutError extends Error {},
 }))
 
+/** Wait for the checking phase to complete and the selector to appear */
+async function waitForSelector() {
+  await screen.findByText('Pilih Posisi Pekerjaan')
+}
+
 vi.mock('../../services/authService', () => ({
   login: vi.fn(),
   register: vi.fn(),
@@ -64,16 +69,25 @@ function renderSpeakingModule() {
 describe('SpeakingModule', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Default: resume_session returns no active session so component transitions to 'select'
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      return Promise.resolve({ sessionId: 'default', type: 'question', content: 'Default question' })
+    })
   })
 
-  it('renders the heading and back button', () => {
+  it('renders the heading and back button', async () => {
     renderSpeakingModule()
+    await waitForSelector()
     expect(screen.getByText('Speaking Module')).toBeInTheDocument()
     expect(screen.getByText('Kembali ke Dashboard')).toBeInTheDocument()
   })
 
-  it('renders job position selector initially', () => {
+  it('renders job position selector initially', async () => {
     renderSpeakingModule()
+    await waitForSelector()
     expect(screen.getByText('Pilih Posisi Pekerjaan')).toBeInTheDocument()
     expect(screen.getByLabelText('Pilih posisi Software Engineer')).toBeInTheDocument()
     expect(screen.getByLabelText('Pilih posisi Product Manager')).toBeInTheDocument()
@@ -84,27 +98,40 @@ describe('SpeakingModule', () => {
     expect(screen.getByLabelText('Pilih posisi Cloud Engineer')).toBeInTheDocument()
   })
 
-  it('navigates to dashboard when back button is clicked', () => {
+  it('navigates to dashboard when back button is clicked', async () => {
     renderSpeakingModule()
+    await waitForSelector()
     fireEvent.click(screen.getByText('Kembali ke Dashboard'))
     expect(mockNavigate).toHaveBeenCalledWith('/dashboard')
   })
 
   it('shows loading state after completing full selection flow', async () => {
-    mockChat.mockReturnValue(new Promise(() => {})) // never resolves
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      return new Promise(() => {}) // never resolves
+    })
     renderSpeakingModule()
+    await waitForSelector()
     completeSelectionFlow('Software Engineer', 'Senior', 'Teknis')
     expect(await screen.findByRole('status')).toBeInTheDocument()
     expect(screen.getByText(/Memulai sesi interview untuk Software Engineer/)).toBeInTheDocument()
   })
 
   it('calls chat API with start_session including seniority and category', async () => {
-    mockChat.mockResolvedValue({
-      sessionId: 'sess-123',
-      type: 'question',
-      content: 'Tell me about yourself.',
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      return Promise.resolve({
+        sessionId: 'sess-123',
+        type: 'question',
+        content: 'Tell me about yourself.',
+      })
     })
     renderSpeakingModule()
+    await waitForSelector()
     completeSelectionFlow('Data Analyst', 'Junior', 'Umum')
     await waitFor(() => {
       expect(mockChat).toHaveBeenCalledWith({
@@ -117,12 +144,18 @@ describe('SpeakingModule', () => {
   })
 
   it('displays the first interview question after API response', async () => {
-    mockChat.mockResolvedValue({
-      sessionId: 'sess-456',
-      type: 'question',
-      content: 'What experience do you have with data analysis?',
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      return Promise.resolve({
+        sessionId: 'sess-456',
+        type: 'question',
+        content: 'What experience do you have with data analysis?',
+      })
     })
     renderSpeakingModule()
+    await waitForSelector()
     completeSelectionFlow('Data Analyst', 'Menengah', 'Teknis')
     expect(await screen.findByTestId('interview-question')).toHaveTextContent(
       'What experience do you have with data analysis?',
@@ -132,8 +165,14 @@ describe('SpeakingModule', () => {
   })
 
   it('shows error message when API call fails', async () => {
-    mockChat.mockRejectedValue(new Error('Network error'))
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      return Promise.reject(new Error('Network error'))
+    })
     renderSpeakingModule()
+    await waitForSelector()
     completeSelectionFlow('Product Manager', 'Lead', 'Umum')
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Gagal memulai sesi interview. Silakan coba lagi.',
@@ -143,16 +182,26 @@ describe('SpeakingModule', () => {
   })
 
   it('allows retrying after an error', async () => {
-    mockChat.mockRejectedValueOnce(new Error('fail'))
+    let callCount = 0
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      callCount++
+      if (callCount === 1) {
+        return Promise.reject(new Error('fail'))
+      }
+      return Promise.resolve({
+        sessionId: 'sess-789',
+        type: 'question',
+        content: 'Describe your coding experience.',
+      })
+    })
     renderSpeakingModule()
+    await waitForSelector()
     completeSelectionFlow('Software Engineer', 'Senior', 'Teknis')
     await screen.findByRole('alert')
 
-    mockChat.mockResolvedValue({
-      sessionId: 'sess-789',
-      type: 'question',
-      content: 'Describe your coding experience.',
-    })
     completeSelectionFlow('Software Engineer', 'Senior', 'Teknis')
     expect(await screen.findByTestId('interview-question')).toHaveTextContent(
       'Describe your coding experience.',
@@ -160,13 +209,19 @@ describe('SpeakingModule', () => {
   })
 
   it('passes questionType to InterviewSession after start_session response', async () => {
-    mockChat.mockResolvedValueOnce({
-      sessionId: 'sess-qt',
-      type: 'question',
-      content: 'First question?',
-      questionType: 'contextual',
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      return Promise.resolve({
+        sessionId: 'sess-qt',
+        type: 'question',
+        content: 'First question?',
+        questionType: 'contextual',
+      })
     })
     renderSpeakingModule()
+    await waitForSelector()
     completeSelectionFlow('Software Engineer', 'Menengah', 'Umum')
 
     await waitFor(() => {
@@ -181,16 +236,22 @@ describe('SpeakingModule', () => {
 describe('SpeakingModule questionType integration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockChat.mockImplementation((args: Record<string, unknown>) => {
+      if (args.action === 'resume_session') {
+        return Promise.resolve({ type: 'no_active_session', content: '', sessionId: '' })
+      }
+      return Promise.resolve({
+        sessionId: 'sess-qt',
+        type: 'question',
+        content: 'First question?',
+        questionType: 'contextual',
+      })
+    })
   })
 
   it('passes questionType to InterviewSession after start_session response', async () => {
-    mockChat.mockResolvedValueOnce({
-      sessionId: 'sess-qt',
-      type: 'question',
-      content: 'First question?',
-      questionType: 'contextual',
-    })
     renderSpeakingModule()
+    await waitForSelector()
     completeSelectionFlow('Software Engineer', 'Menengah', 'Umum')
 
     // Wait for interview phase
