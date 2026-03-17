@@ -71,14 +71,14 @@ describe('Feature: interview-position-enhancement, Property 5: Start session req
           // Wait for the async chat call (start_session, not resume_session)
           await waitFor(() => {
             const startCalls = vi.mocked(chat).mock.calls.filter(
-              (c) => (c[0] as Record<string, unknown>).action === 'start_session'
+              (c) => c[0].action === 'start_session'
             )
             expect(startCalls.length).toBeGreaterThan(0)
           })
 
           // Verify the ChatRequest contains all parameters
           const startCall = vi.mocked(chat).mock.calls.find(
-            (c) => (c[0] as Record<string, unknown>).action === 'start_session'
+            (c) => c[0].action === 'start_session'
           )!
           const callArgs = startCall[0]
           expect(callArgs.action).toBe('start_session')

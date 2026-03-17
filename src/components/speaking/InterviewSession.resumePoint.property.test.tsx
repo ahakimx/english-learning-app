@@ -220,7 +220,7 @@ describe('Property 5: Resume point is correctly determined from session state', 
             })
             // Only resume_session was called, no analyze_answer or next_question
             const nonResumeCalls = mockChat.mock.calls.filter(
-              (c: [{ action: string }]) => c[0].action !== 'resume_session',
+              (c: Array<Record<string, unknown>>) => (c[0] as Record<string, unknown>).action !== 'resume_session',
             )
             expect(nonResumeCalls.length).toBe(0)
           } else if (tag === 'unanalyzed') {

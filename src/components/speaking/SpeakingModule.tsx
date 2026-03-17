@@ -123,7 +123,7 @@ export default function SpeakingModule() {
     } else if (!lastQuestion.feedback) {
       setPhase('loading')
       try {
-        const response = await chat({
+        await chat({
           action: 'analyze_answer',
           sessionId: resumeSessionData.sessionId,
           transcription: lastQuestion.transcription,
