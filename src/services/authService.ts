@@ -18,9 +18,16 @@ const GENERIC_AUTH_ERROR = 'Email atau password salah';
 
 export async function login(email: string, password: string): Promise<SignInOutput> {
   try {
+    // Clear any stuck sign-in state from a previous failed attempt
+    try {
+      await signOut();
+    } catch {
+      // Ignore — no active session to clear
+    }
     const result = await signIn({ username: email, password });
     return result;
-  } catch {
+  } catch (err) {
+    console.error('[auth] login error:', err);
     throw new Error(GENERIC_AUTH_ERROR);
   }
 }
