@@ -6,7 +6,7 @@ import type { ProgressData } from '../../types'
 import Sidebar from './Sidebar'
 
 export default function Dashboard() {
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const navigate = useNavigate()
   const [progress, setProgress] = useState<ProgressData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -33,8 +33,9 @@ export default function Dashboard() {
   const totalWriting = progress?.writing.totalReviews ?? 0
   const totalPractice = totalSessions + totalQuizzes + totalWriting
 
-  // SVG radial progress (percentage-based for responsive)
-  const circumference = 264
+  // SVG radial progress
+  const radius = 42
+  const circumference = 2 * Math.PI * radius
   const strokeOffset = circumference - (overallScore / 100) * circumference
 
   return (
@@ -80,9 +81,9 @@ export default function Dashboard() {
                 <div className="w-48 h-48 md:w-64 md:h-64 rounded-full bg-surface-container animate-pulse" />
               ) : (
                 <div className="relative w-48 h-48 md:w-64 md:h-64 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90">
-                    <circle className="text-surface-container-highest" cx="50%" cy="50%" fill="transparent" r="42%" stroke="currentColor" strokeWidth="10" />
-                    <circle className="text-tertiary" cx="50%" cy="50%" fill="transparent" r="42%" stroke="currentColor" strokeDasharray={circumference} strokeDashoffset={strokeOffset} strokeLinecap="round" strokeWidth="10" />
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle className="text-surface-container-highest" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeWidth="8" />
+                    <circle className="text-tertiary" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeDasharray={circumference} strokeDashoffset={strokeOffset} strokeLinecap="round" strokeWidth="8" />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
                     <span className="text-4xl md:text-5xl font-headline font-extrabold text-primary">{overallScore}%</span>
