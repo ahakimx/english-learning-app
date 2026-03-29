@@ -84,37 +84,39 @@ describe('WritingModule', () => {
     mockUpdateProgress.mockResolvedValue(undefined)
   })
 
-  it('renders heading and back button', () => {
+  it('renders TopAppBar with brand and Writing tab active', () => {
     renderWritingModule()
-    expect(screen.getByText('Writing Module')).toBeInTheDocument()
-    expect(screen.getByText('Kembali ke Dashboard')).toBeInTheDocument()
+    expect(screen.getByText('InterviewPrep Pro')).toBeInTheDocument()
+    // Writing tab should be active (has border styling)
+    const writingTab = screen.getByRole('button', { name: 'Writing' })
+    expect(writingTab).toBeInTheDocument()
   })
 
-  it('renders writing type selector with Essay and Email options', () => {
+  it('renders Stitch landing page with hero and assignments', () => {
     renderWritingModule()
-    expect(screen.getByText('Pilih Tipe Tulisan')).toBeInTheDocument()
-    expect(screen.getByTestId('writing-type-essay')).toBeInTheDocument()
-    expect(screen.getByTestId('writing-type-email')).toBeInTheDocument()
+    expect(screen.getByText('Master the Written Pitch')).toBeInTheDocument()
+    expect(screen.getByText('Active Assignments')).toBeInTheDocument()
+    expect(screen.getByText('Writing Proficiency')).toBeInTheDocument()
   })
 
-  it('navigates to dashboard when back button is clicked', () => {
+  it('navigates to dashboard when Overview tab is clicked', () => {
     renderWritingModule()
-    fireEvent.click(screen.getByText('Kembali ke Dashboard'))
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }))
     expect(mockNavigate).toHaveBeenCalledWith('/dashboard')
   })
 
-  it('shows loading state when type is selected', async () => {
+  it('shows loading state when assignment card is clicked (essay)', async () => {
     mockChat.mockReturnValue(new Promise(() => {}))
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     expect(await screen.findByRole('status')).toBeInTheDocument()
     expect(screen.getByText('Memuat prompt tulisan...')).toBeInTheDocument()
   })
 
-  it('calls chat API with writing_prompt when essay type is selected', async () => {
+  it('calls chat API with writing_prompt when essay assignment is clicked', async () => {
     mockChat.mockResolvedValue(samplePromptResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await waitFor(() => {
       expect(mockChat).toHaveBeenCalledWith({
         action: 'writing_prompt',
@@ -123,10 +125,10 @@ describe('WritingModule', () => {
     })
   })
 
-  it('calls chat API with writing_prompt when email type is selected', async () => {
+  it('calls chat API with writing_prompt when email assignment is clicked', async () => {
     mockChat.mockResolvedValue(samplePromptResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-email'))
+    fireEvent.click(screen.getByText('Write a follow-up email').closest('button')!)
     await waitFor(() => {
       expect(mockChat).toHaveBeenCalledWith({
         action: 'writing_prompt',
@@ -138,7 +140,7 @@ describe('WritingModule', () => {
   it('displays writing editor with prompt after API response', async () => {
     mockChat.mockResolvedValue(samplePromptResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     expect(await screen.findByText(samplePromptResponse.content)).toBeInTheDocument()
     expect(screen.getByTestId('writing-textarea')).toBeInTheDocument()
     expect(screen.getByTestId('submit-writing')).toBeInTheDocument()
@@ -147,18 +149,18 @@ describe('WritingModule', () => {
   it('shows error when prompt API fails', async () => {
     mockChat.mockRejectedValue(new Error('Network error'))
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Gagal memuat prompt tulisan. Silakan coba lagi.',
     )
-    // Should return to type selection
-    expect(screen.getByText('Pilih Tipe Tulisan')).toBeInTheDocument()
+    // Should return to landing page
+    expect(screen.getByText('Master the Written Pitch')).toBeInTheDocument()
   })
 
   it('disables submit button when text is less than 50 characters', async () => {
     mockChat.mockResolvedValue(samplePromptResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'Short text' } })
@@ -168,7 +170,7 @@ describe('WritingModule', () => {
   it('enables submit button when text reaches 50 characters', async () => {
     mockChat.mockResolvedValue(samplePromptResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     const longText = 'A'.repeat(50)
@@ -179,7 +181,7 @@ describe('WritingModule', () => {
   it('shows character count', async () => {
     mockChat.mockResolvedValue(samplePromptResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'Hello world' } })
@@ -191,7 +193,7 @@ describe('WritingModule', () => {
       .mockResolvedValueOnce(samplePromptResponse)
       .mockResolvedValueOnce(sampleReviewResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     const content = 'A'.repeat(60)
@@ -213,7 +215,7 @@ describe('WritingModule', () => {
       .mockResolvedValueOnce(samplePromptResponse)
       .mockReturnValueOnce(new Promise(() => {}))
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'A'.repeat(60) } })
@@ -227,7 +229,7 @@ describe('WritingModule', () => {
       .mockResolvedValueOnce(samplePromptResponse)
       .mockResolvedValueOnce(sampleReviewResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'A'.repeat(60) } })
@@ -245,7 +247,7 @@ describe('WritingModule', () => {
       .mockResolvedValueOnce(samplePromptResponse)
       .mockResolvedValueOnce(sampleReviewResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'A'.repeat(60) } })
@@ -262,7 +264,7 @@ describe('WritingModule', () => {
       .mockResolvedValueOnce(samplePromptResponse)
       .mockResolvedValueOnce(sampleReviewResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'A'.repeat(60) } })
@@ -277,7 +279,7 @@ describe('WritingModule', () => {
       .mockResolvedValueOnce(samplePromptResponse)
       .mockResolvedValueOnce(sampleReviewResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'A'.repeat(60) } })
@@ -293,7 +295,7 @@ describe('WritingModule', () => {
       .mockResolvedValueOnce(samplePromptResponse)
       .mockResolvedValueOnce(sampleReviewResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'A'.repeat(60) } })
@@ -314,7 +316,7 @@ describe('WritingModule', () => {
       .mockResolvedValueOnce(samplePromptResponse)
       .mockResolvedValueOnce(sampleReviewResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'A'.repeat(60) } })
@@ -325,12 +327,12 @@ describe('WritingModule', () => {
     expect(screen.getByTestId('change-type')).toHaveTextContent('Ganti Tipe')
   })
 
-  it('returns to type selection when "Ganti Tipe" is clicked', async () => {
+  it('returns to landing page when "Ganti Tipe" is clicked', async () => {
     mockChat
       .mockResolvedValueOnce(samplePromptResponse)
       .mockResolvedValueOnce(sampleReviewResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'A'.repeat(60) } })
@@ -339,13 +341,13 @@ describe('WritingModule', () => {
     await screen.findByTestId('writing-review')
     fireEvent.click(screen.getByTestId('change-type'))
 
-    expect(screen.getByText('Pilih Tipe Tulisan')).toBeInTheDocument()
+    expect(screen.getByText('Master the Written Pitch')).toBeInTheDocument()
   })
 
-  it('shows current type in header during writing', async () => {
+  it('shows current type during writing phase', async () => {
     mockChat.mockResolvedValue(samplePromptResponse)
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     expect(screen.getByTestId('current-type')).toHaveTextContent('Tipe: Essay')
@@ -356,7 +358,7 @@ describe('WritingModule', () => {
       .mockResolvedValueOnce(samplePromptResponse)
       .mockRejectedValueOnce(new Error('Network error'))
     renderWritingModule()
-    fireEvent.click(screen.getByTestId('writing-type-essay'))
+    fireEvent.click(screen.getByText('Draft your elevator pitch').closest('button')!)
     await screen.findByTestId('writing-textarea')
 
     fireEvent.change(screen.getByTestId('writing-textarea'), { target: { value: 'A'.repeat(60) } })
@@ -367,5 +369,17 @@ describe('WritingModule', () => {
     )
     // Should return to writing phase so user can retry
     expect(screen.getByTestId('writing-textarea')).toBeInTheDocument()
+  })
+
+  it('triggers email type when focus track "High-Stakes Emails" is clicked', async () => {
+    mockChat.mockReturnValue(new Promise(() => {}))
+    renderWritingModule()
+    fireEvent.click(screen.getByText('High-Stakes Emails').closest('button')!)
+    await waitFor(() => {
+      expect(mockChat).toHaveBeenCalledWith({
+        action: 'writing_prompt',
+        writingType: 'email',
+      })
+    })
   })
 })

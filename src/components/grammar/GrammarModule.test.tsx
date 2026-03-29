@@ -7,7 +7,7 @@ import { AuthProvider } from '../../hooks/useAuth'
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom')
-  return { ...actual, useNavigate: () => mockNavigate }
+  return { ...actual, useNavigate: () => mockNavigate, useLocation: () => ({ pathname: '/grammar' }) }
 })
 
 const mockChat = vi.fn()
@@ -71,40 +71,64 @@ describe('GrammarModule', () => {
     mockUpdateProgress.mockResolvedValue(undefined)
   })
 
-  it('renders heading and back button', () => {
+  it('renders Stitch landing page with hero and TopAppBar', () => {
     renderGrammarModule()
-    expect(screen.getByText('Grammar Module')).toBeInTheDocument()
-    expect(screen.getByText('Kembali ke Dashboard')).toBeInTheDocument()
+    expect(screen.getByText('Grammar for Business')).toBeInTheDocument()
+    expect(screen.getByText('Executive Core')).toBeInTheDocument()
+    expect(screen.getByText('InterviewPrep Pro')).toBeInTheDocument()
   })
 
-  it('renders all 5 grammar topics', () => {
+  it('renders all 5 grammar topic cards on landing page', () => {
     renderGrammarModule()
-    expect(screen.getByText('Pilih Topik Grammar')).toBeInTheDocument()
-    expect(screen.getByLabelText('Pilih topik Tenses')).toBeInTheDocument()
-    expect(screen.getByLabelText('Pilih topik Articles')).toBeInTheDocument()
-    expect(screen.getByLabelText('Pilih topik Prepositions')).toBeInTheDocument()
-    expect(screen.getByLabelText('Pilih topik Conditionals')).toBeInTheDocument()
-    expect(screen.getByLabelText('Pilih topik Passive Voice')).toBeInTheDocument()
+    expect(screen.getByText('Precision in Tenses')).toBeInTheDocument()
+    expect(screen.getByText('Articles & Determiners')).toBeInTheDocument()
+    expect(screen.getAllByText('Prepositions of Strategy').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Complex Conditionals')).toBeInTheDocument()
+    expect(screen.getAllByText('Passive Voice Structure').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('navigates to dashboard when back button is clicked', () => {
+  it('renders mastery radial chart with percentage', () => {
     renderGrammarModule()
-    fireEvent.click(screen.getByText('Kembali ke Dashboard'))
+    expect(screen.getByText('72%')).toBeInTheDocument()
+    expect(screen.getByText('Advanced Level')).toBeInTheDocument()
+  })
+
+  it('renders daily quiz CTA section', () => {
+    renderGrammarModule()
+    expect(screen.getByText('Daily Grammar Quiz')).toBeInTheDocument()
+    expect(screen.getByText("Start Today's Quiz")).toBeInTheDocument()
+  })
+
+  it('renders review mistakes panel', () => {
+    renderGrammarModule()
+    expect(screen.getByText('Review Mistakes')).toBeInTheDocument()
+    expect(screen.getByText('Re-take Practice Set')).toBeInTheDocument()
+  })
+
+  it('renders expert tip section', () => {
+    renderGrammarModule()
+    expect(screen.getByText('Executive Insights')).toBeInTheDocument()
+    expect(screen.getByText('The Power of the Subjunctive')).toBeInTheDocument()
+  })
+
+  it('navigates to dashboard when Overview tab is clicked', () => {
+    renderGrammarModule()
+    fireEvent.click(screen.getByText('Overview'))
     expect(mockNavigate).toHaveBeenCalledWith('/dashboard')
   })
 
-  it('shows loading state when topic is selected', async () => {
+  it('shows loading state when topic card is clicked', async () => {
     mockChat.mockReturnValue(new Promise(() => {}))
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     expect(await screen.findByRole('status')).toBeInTheDocument()
     expect(screen.getByText('Memuat soal quiz...')).toBeInTheDocument()
   })
 
-  it('calls chat API with grammar_quiz when topic is selected', async () => {
+  it('calls chat API with grammar_quiz when topic card is clicked', async () => {
     mockChat.mockResolvedValue(sampleQuizResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await waitFor(() => {
       expect(mockChat).toHaveBeenCalledWith({
         action: 'grammar_quiz',
@@ -116,7 +140,7 @@ describe('GrammarModule', () => {
   it('displays quiz question after API response', async () => {
     mockChat.mockResolvedValue(sampleQuizResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     expect(await screen.findByTestId('quiz-question')).toHaveTextContent(
       'Choose the correct form: She ___ to school every day.',
     )
@@ -129,12 +153,12 @@ describe('GrammarModule', () => {
   it('shows error when quiz API fails', async () => {
     mockChat.mockRejectedValue(new Error('Network error'))
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Gagal memuat soal quiz. Silakan coba lagi.',
     )
-    // Should return to topic selection
-    expect(screen.getByText('Pilih Topik Grammar')).toBeInTheDocument()
+    // Should return to landing page
+    expect(screen.getByText('Grammar for Business')).toBeInTheDocument()
   })
 
   it('highlights correct answer in green and wrong answer in red after selection', async () => {
@@ -142,7 +166,7 @@ describe('GrammarModule', () => {
       .mockResolvedValueOnce(sampleQuizResponse)
       .mockResolvedValueOnce(sampleExplanationResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     // Select wrong answer
@@ -162,7 +186,7 @@ describe('GrammarModule', () => {
       .mockResolvedValueOnce(sampleQuizResponse)
       .mockResolvedValueOnce(sampleExplanationResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     fireEvent.click(screen.getByTestId('option-0'))
@@ -178,7 +202,7 @@ describe('GrammarModule', () => {
       .mockResolvedValueOnce(sampleQuizResponse)
       .mockResolvedValueOnce(sampleExplanationResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     fireEvent.click(screen.getByTestId('option-1')) // 'goes' - correct
@@ -197,7 +221,7 @@ describe('GrammarModule', () => {
       .mockResolvedValueOnce(sampleQuizResponse)
       .mockResolvedValueOnce(sampleExplanationResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     fireEvent.click(screen.getByTestId('option-1')) // correct answer
@@ -214,7 +238,7 @@ describe('GrammarModule', () => {
       .mockResolvedValueOnce(sampleQuizResponse)
       .mockResolvedValueOnce(sampleExplanationResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     fireEvent.click(screen.getByTestId('option-0')) // 'go' - wrong
@@ -228,7 +252,7 @@ describe('GrammarModule', () => {
       .mockResolvedValueOnce(sampleQuizResponse)
       .mockResolvedValueOnce(sampleExplanationResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     fireEvent.click(screen.getByTestId('option-1')) // correct
@@ -247,7 +271,7 @@ describe('GrammarModule', () => {
       .mockResolvedValueOnce(sampleQuizResponse)
       .mockResolvedValueOnce(sampleExplanationResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     fireEvent.click(screen.getByTestId('option-0')) // wrong
@@ -277,7 +301,7 @@ describe('GrammarModule', () => {
       .mockResolvedValueOnce(sampleExplanationResponse)
       .mockResolvedValueOnce(secondQuiz)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     fireEvent.click(screen.getByTestId('option-1'))
@@ -290,12 +314,12 @@ describe('GrammarModule', () => {
     )
   })
 
-  it('displays score counter in header during quiz', async () => {
+  it('displays score counter during quiz', async () => {
     mockChat
       .mockResolvedValueOnce(sampleQuizResponse)
       .mockResolvedValueOnce(sampleExplanationResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     fireEvent.click(screen.getByTestId('option-1')) // correct
@@ -304,12 +328,35 @@ describe('GrammarModule', () => {
     expect(screen.getByTestId('score-display')).toHaveTextContent('Skor: 1/1')
   })
 
-  it('shows topic name in header during quiz', async () => {
+  it('shows topic name during quiz', async () => {
     mockChat.mockResolvedValue(sampleQuizResponse)
     renderGrammarModule()
-    fireEvent.click(screen.getByLabelText('Pilih topik Tenses'))
+    fireEvent.click(screen.getByText('Precision in Tenses'))
     await screen.findByTestId('quiz-question')
 
     expect(screen.getByTestId('current-topic')).toHaveTextContent('Topik: tenses')
+  })
+
+  it('triggers handleSelectTopic when daily quiz CTA is clicked', async () => {
+    mockChat.mockReturnValue(new Promise(() => {}))
+    renderGrammarModule()
+    fireEvent.click(screen.getByText("Start Today's Quiz"))
+    await waitFor(() => {
+      expect(mockChat).toHaveBeenCalledWith({
+        action: 'grammar_quiz',
+        grammarTopic: 'tenses',
+      })
+    })
+  })
+
+  it('returns to landing page when Ganti Topik is clicked', async () => {
+    mockChat.mockResolvedValue(sampleQuizResponse)
+    renderGrammarModule()
+    fireEvent.click(screen.getByText('Precision in Tenses'))
+    await screen.findByTestId('quiz-question')
+
+    fireEvent.click(screen.getByText('Ganti Topik'))
+
+    expect(screen.getByText('Grammar for Business')).toBeInTheDocument()
   })
 })
