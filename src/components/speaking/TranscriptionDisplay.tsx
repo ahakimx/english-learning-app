@@ -6,11 +6,11 @@ export default function TranscriptionDisplay({ transcription }: TranscriptionDis
   if (!transcription) return null;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4">
-      <h3 className="text-sm font-semibold text-gray-700 mb-2">
+    <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-4">
+      <h3 className="text-sm font-headline font-bold text-primary mb-2">
         Transkripsi Jawaban Anda:
       </h3>
-      <p className="text-gray-800 leading-relaxed" data-testid="transcription-text">
+      <p className="text-on-surface leading-relaxed font-body" data-testid="transcription-text">
         {transcription}
       </p>
     </div>

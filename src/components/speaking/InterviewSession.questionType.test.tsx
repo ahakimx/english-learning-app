@@ -97,16 +97,16 @@ describe('InterviewSession questionType badge', () => {
     render(<InterviewSession {...defaultProps} questionType="introduction" />);
     const badge = screen.getByTestId('question-type-badge');
     expect(badge).toHaveTextContent('Perkenalan');
-    expect(badge.className).toContain('bg-blue-100');
-    expect(badge.className).toContain('text-blue-700');
+    expect(badge.className).toContain('bg-primary-fixed');
+    expect(badge.className).toContain('text-primary');
   });
 
   it('renders "Pertanyaan Lanjutan" badge with purple styling for contextual questionType', () => {
     render(<InterviewSession {...defaultProps} questionType="contextual" />);
     const badge = screen.getByTestId('question-type-badge');
     expect(badge).toHaveTextContent('Pertanyaan Lanjutan');
-    expect(badge.className).toContain('bg-purple-100');
-    expect(badge.className).toContain('text-purple-700');
+    expect(badge.className).toContain('bg-secondary-container');
+    expect(badge.className).toContain('text-on-secondary-container');
   });
 
   it('renders no badge when questionType is undefined', () => {
