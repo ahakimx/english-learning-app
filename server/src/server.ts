@@ -453,6 +453,7 @@ async function processOutputStream(
   // After END_TURN, Nova Sonic re-sends the full transcript as TEXT blocks.
   // We track this to skip the duplicate summary text.
   let skipAssistantTextUntilUserTurn = false;
+  let lastRole = '';  // Track last TEXT content role for turn switch detection
 
   // Audio: send directly to client — the AudioWorklet ring buffer handles smoothing
   let firstAudioLogged = false;
@@ -485,10 +486,11 @@ async function processOutputStream(
       if (eventData.contentStart) {
         const cs = eventData.contentStart as Record<string, unknown>;
         if (cs.contentId && cs.role) {
-          contentRoles.set(cs.contentId as string, (cs.role as string).toUpperCase());
-          contentTypes.set(cs.contentId as string, ((cs.type as string) ?? '').toUpperCase());
+          const role = (cs.role as string).toUpperCase();
+          const type = ((cs.type as string) ?? '').toUpperCase();
+          contentRoles.set(cs.contentId as string, role);
+          contentTypes.set(cs.contentId as string, type);
           
-          // Track generationStage: SPECULATIVE vs FINAL
           let stage = 'FINAL';
           if (cs.additionalModelFields) {
             try {
@@ -499,6 +501,18 @@ async function processOutputStream(
             } catch { /* ignore */ }
           }
           contentStages.set(cs.contentId as string, stage);
+
+          // Detect turn switch: emit BEFORE any transcript for the new turn
+          if (role === 'ASSISTANT' && type === 'TEXT' && lastRole === 'USER') {
+            socket.emit('turnSwitch', { from: 'user', to: 'ai' });
+            skipAssistantTextUntilUserTurn = false;
+          } else if (role === 'USER' && type === 'TEXT' && lastRole === 'ASSISTANT') {
+            socket.emit('turnSwitch', { from: 'ai', to: 'user' });
+          }
+          
+          if (type === 'TEXT') {
+            lastRole = role;
+          }
           
           console.log(`[Socket.IO] [${socket.id}] contentStart: contentId=${cs.contentId}, role=${cs.role}, type=${cs.type}, stage=${stage}`);
         }
