@@ -60,6 +60,7 @@ interface StreamSession {
   closed: boolean;
   interrupted: boolean;
   conversationHistory: ConversationTurn[];
+  keepAliveTimer: ReturnType<typeof setInterval> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +338,7 @@ io.on('connection', (socket) => {
         closed: false,
         interrupted: false,
         conversationHistory: [],
+        keepAliveTimer: null,
       };
 
       // IMPORTANT: Queue events BEFORE client.send() — the SDK starts reading
@@ -446,6 +448,11 @@ async function processOutputStream(
 ): Promise<void> {
   let eventCount = 0;
   const contentRoles = new Map<string, string>();
+  const contentTypes = new Map<string, string>();
+  const contentStages = new Map<string, string>();
+  // After END_TURN, Nova Sonic re-sends the full transcript as TEXT blocks.
+  // We track this to skip the duplicate summary text.
+  let skipAssistantTextUntilUserTurn = false;
 
   // Audio: send directly to client — the AudioWorklet ring buffer handles smoothing
   let firstAudioLogged = false;
@@ -474,15 +481,26 @@ async function processOutputStream(
         console.log(`[Socket.IO] [${socket.id}] Event #${eventCount}:`, Object.keys(eventData));
       }
 
-      // Track contentStart to map contentId → role
+      // Track contentStart to map contentId → role, type, and generationStage
       if (eventData.contentStart) {
         const cs = eventData.contentStart as Record<string, unknown>;
         if (cs.contentId && cs.role) {
           contentRoles.set(cs.contentId as string, (cs.role as string).toUpperCase());
-          console.log(`[Socket.IO] [${socket.id}] contentStart: contentId=${cs.contentId}, role=${cs.role}, type=${cs.type}`);
-          if (cs.audioOutputConfiguration) {
-            console.log(`[Socket.IO] [${socket.id}] audioOutputConfig:`, JSON.stringify(cs.audioOutputConfiguration));
+          contentTypes.set(cs.contentId as string, ((cs.type as string) ?? '').toUpperCase());
+          
+          // Track generationStage: SPECULATIVE vs FINAL
+          let stage = 'FINAL';
+          if (cs.additionalModelFields) {
+            try {
+              const fields = typeof cs.additionalModelFields === 'string' 
+                ? JSON.parse(cs.additionalModelFields) 
+                : cs.additionalModelFields;
+              stage = (fields.generationStage ?? 'FINAL').toUpperCase();
+            } catch { /* ignore */ }
           }
+          contentStages.set(cs.contentId as string, stage);
+          
+          console.log(`[Socket.IO] [${socket.id}] contentStart: contentId=${cs.contentId}, role=${cs.role}, type=${cs.type}, stage=${stage}`);
         }
       }
 
@@ -501,14 +519,29 @@ async function processOutputStream(
         }
       }
 
-      // Handle text output (transcript)
+      // Handle text output
       if (eventData.textOutput) {
         const textOutput = eventData.textOutput as { role?: string; content?: string; contentId?: string };
         if (textOutput.content) {
-          // Role can be "USER" or "ASSISTANT" (uppercase from Nova Sonic)
+          const contentType = textOutput.contentId ? contentTypes.get(textOutput.contentId) : undefined;
+          const contentStage = textOutput.contentId ? contentStages.get(textOutput.contentId) : undefined;
           const rawRole = (textOutput.role ?? '').toUpperCase();
+          
+          // Skip AUDIO block text (always duplicate)
+          if (contentType === 'AUDIO') continue;
+          
           const role: 'user' | 'ai' = rawRole === 'USER' ? 'user' : 'ai';
-          socket.emit('transcript', { role, text: textOutput.content, partial: true });
+          
+          if (contentStage === 'SPECULATIVE') {
+            // SPECULATIVE = real-time partial text during speech — always send
+            socket.emit('transcript', { role, text: textOutput.content, partial: true });
+          } else if (skipAssistantTextUntilUserTurn && rawRole === 'ASSISTANT') {
+            // FINAL after END_TURN = duplicate summary — skip
+            continue;
+          } else {
+            // FINAL text (e.g. USER final) — send
+            socket.emit('transcript', { role, text: textOutput.content, partial: false });
+          }
         }
       }
 
@@ -518,16 +551,27 @@ async function processOutputStream(
         const trackedRole = contentEnd.contentId ? contentRoles.get(contentEnd.contentId) : undefined;
         console.log(`[Socket.IO] [${socket.id}] contentEnd: contentId=${contentEnd.contentId}, trackedRole=${trackedRole}, type=${contentEnd.type}, stopReason=${contentEnd.stopReason}`);
 
-        // Flush any remaining audio before signaling content end
-        if (trackedRole === 'ASSISTANT') {
-          socket.emit('contentEnd', { role: 'ai' });
-          session.interrupted = false;
-        } else if (trackedRole === 'USER') {
-          socket.emit('contentEnd', { role: 'user' });
+        // Only emit contentEnd to client for FULL turn ends, not PARTIAL_TURN
+        // PARTIAL_TURN means more content blocks coming for the same turn
+        if (contentEnd.stopReason !== 'PARTIAL_TURN') {
+          if (trackedRole === 'ASSISTANT') {
+            socket.emit('contentEnd', { role: 'ai' });
+            session.interrupted = false;
+            // After ASSISTANT END_TURN, Nova Sonic re-sends full transcript
+            // as duplicate TEXT blocks. Skip those.
+            if (contentEnd.stopReason === 'END_TURN') {
+              skipAssistantTextUntilUserTurn = true;
+            }
+          } else if (trackedRole === 'USER') {
+            socket.emit('contentEnd', { role: 'user' });
+            skipAssistantTextUntilUserTurn = false;
+          }
         }
 
         if (contentEnd.contentId) {
           contentRoles.delete(contentEnd.contentId);
+          contentTypes.delete(contentEnd.contentId);
+          contentStages.delete(contentEnd.contentId);
         }
       }
     }
@@ -551,6 +595,12 @@ async function processOutputStream(
 function cleanupSession(session: StreamSession): void {
   if (session.closed) return;
   session.closed = true;
+
+  // Stop keep-alive
+  if (session.keepAliveTimer) {
+    clearInterval(session.keepAliveTimer);
+    session.keepAliveTimer = null;
+  }
 
   // Closing sequence per AWS docs: contentEnd → promptEnd → sessionEnd
   try {
