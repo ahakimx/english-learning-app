@@ -282,9 +282,11 @@ const httpServer = createServer(app);
 
 const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:5174'],
+    origin: '*',
     methods: ['GET', 'POST'],
   },
+  // Prefer polling transport for App Runner compatibility (no sticky sessions)
+  transports: ['polling', 'websocket'],
 });
 
 // ---------------------------------------------------------------------------
