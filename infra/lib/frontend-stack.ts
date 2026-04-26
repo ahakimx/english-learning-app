@@ -7,13 +7,14 @@ export interface FrontendStackProps extends cdk.StackProps {
   auth: AuthStackOutputs;
   storage: StorageStackOutputs;
   apiUrl: string;
+  webSocketUrl?: string;
 }
 
 export class FrontendStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: FrontendStackProps) {
     super(scope, id, props);
 
-    const { auth, storage, apiUrl } = props;
+    const { auth, storage, apiUrl, webSocketUrl } = props;
 
     // AWS Amplify App for React/Vite SPA
     const amplifyApp = new amplify.CfnApp(this, 'EnglishLearningAmplifyApp', {
@@ -53,6 +54,7 @@ export class FrontendStack extends cdk.Stack {
         { name: 'VITE_IDENTITY_POOL_ID', value: auth.identityPoolId },
         { name: 'VITE_AUDIO_BUCKET_NAME', value: storage.audioBucketName },
         { name: 'VITE_AWS_REGION', value: cdk.Aws.REGION },
+        ...(webSocketUrl ? [{ name: 'VITE_WEBSOCKET_URL', value: webSocketUrl }] : []),
       ],
     });
 

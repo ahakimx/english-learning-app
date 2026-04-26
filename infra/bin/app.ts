@@ -5,6 +5,7 @@ import { AuthStack } from '../lib/auth-stack';
 import { StorageStack } from '../lib/storage-stack';
 import { ApiStack } from '../lib/api-stack';
 import { FrontendStack } from '../lib/frontend-stack';
+import { WebSocketStack } from '../lib/websocket-stack';
 
 const app = new cdk.App();
 
@@ -29,10 +30,22 @@ const apiStack = new ApiStack(app, 'EnglishLearningApp-ApiStack', {
 apiStack.addDependency(authStack);
 apiStack.addDependency(storageStack);
 
-// 4. Frontend Stack — Amplify Hosting (depends on Auth + Storage + API)
+// 4. WebSocket Stack — WebSocket API Gateway + Lambda (depends on Auth + Storage)
+const webSocketStack = new WebSocketStack(app, 'EnglishLearningApp-WebSocketStack', {
+  description: 'English Learning App - WebSocket API (Nova Sonic Real-Time Speaking)',
+  wsProps: {
+    auth: authStack.outputs,
+    storage: storageStack.outputs,
+  },
+});
+webSocketStack.addDependency(authStack);
+webSocketStack.addDependency(storageStack);
+
+// 5. Frontend Stack — Amplify Hosting (depends on Auth + Storage + API + WebSocket)
 new FrontendStack(app, 'EnglishLearningApp-FrontendStack', {
   description: 'English Learning App - Frontend Hosting (Amplify)',
   auth: authStack.outputs,
   storage: storageStack.outputs,
   apiUrl: apiStack.apiUrl,
+  webSocketUrl: webSocketStack.webSocketUrl,
 });

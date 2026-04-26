@@ -20,9 +20,52 @@ vi.mock('react-router-dom', async () => {
 const mockChat = vi.fn()
 vi.mock('../../services/apiClient', () => ({
   chat: (...args: unknown[]) => mockChat(...args),
-  speak: vi.fn(() => Promise.resolve({ audioData: '' })),
   getProgress: vi.fn(() => Promise.resolve({})),
   TimeoutError: class TimeoutError extends Error {},
+}))
+
+// Mock the Nova Sonic hook
+const mockConnect = vi.fn(() => Promise.resolve())
+const mockDisconnect = vi.fn()
+const mockStartSession = vi.fn(() => Promise.resolve())
+const mockSendAudioChunk = vi.fn()
+const mockEndSession = vi.fn(() => Promise.resolve())
+const mockInterrupt = vi.fn()
+
+vi.mock('../../hooks/useNovaSonic', () => ({
+  default: () => ({
+    connect: mockConnect,
+    disconnect: mockDisconnect,
+    startSession: mockStartSession,
+    sendAudioChunk: mockSendAudioChunk,
+    endSession: mockEndSession,
+    interrupt: mockInterrupt,
+    connectionState: 'disconnected' as const,
+    currentTurn: 'idle' as const,
+    sessionActive: false,
+  }),
+}))
+
+// Mock audio capture hook
+const mockAudioStart = vi.fn(() => Promise.resolve())
+const mockAudioStop = vi.fn()
+vi.mock('../../hooks/useAudioCapture', () => ({
+  useAudioCapture: () => ({
+    isCapturing: false,
+    start: mockAudioStart,
+    stop: mockAudioStop,
+    error: null,
+  }),
+}))
+
+// Mock audio playback hook
+vi.mock('../../hooks/useAudioPlayback', () => ({
+  useAudioPlayback: () => ({
+    playChunk: vi.fn(),
+    stop: vi.fn(),
+    isPlaying: false,
+    error: null,
+  }),
 }))
 
 vi.mock('../../services/authService', () => ({
@@ -33,6 +76,7 @@ vi.mock('../../services/authService', () => ({
     Promise.resolve({ userId: 'u1', email: 'user@example.com' }),
   ),
   getAccessToken: vi.fn(() => Promise.resolve(null)),
+  refreshSession: vi.fn(() => Promise.resolve(null)),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -131,8 +175,9 @@ describe('SpeakingModule resume flow', () => {
     })
     renderSpeakingModule()
 
+    // After checking, the overview page appears (select phase without showPositionSelector)
     await waitFor(() => {
-      expect(screen.getByText('Pilih Posisi Pekerjaan')).toBeInTheDocument()
+      expect(screen.getByText('Speaking Performance')).toBeInTheDocument()
     })
   })
 
@@ -140,13 +185,13 @@ describe('SpeakingModule resume flow', () => {
     mockChat.mockRejectedValue(new Error('Network error'))
     renderSpeakingModule()
 
+    // After error, falls back to select phase (overview page)
     await waitFor(() => {
-      expect(screen.getByText('Pilih Posisi Pekerjaan')).toBeInTheDocument()
+      expect(screen.getByText('Speaking Performance')).toBeInTheDocument()
     })
   })
 
-  it('resume button restores state and navigates to interview', async () => {
-    // sessionData has last question (q2) with no transcription → resume at that question
+  it('resume button connects WebSocket and navigates to interview', async () => {
     mockChat.mockImplementation((req: { action: string }) => {
       if (req.action === 'resume_session') {
         return Promise.resolve({
@@ -168,7 +213,15 @@ describe('SpeakingModule resume flow', () => {
     fireEvent.click(screen.getByText('Lanjutkan Sesi'))
 
     await waitFor(() => {
-      expect(screen.getByTestId('interview-question')).toHaveTextContent('What are your strengths?')
+      expect(screen.getByTestId('interview-realtime')).toBeInTheDocument()
+    })
+
+    // Verify session was started with resume config (direct Bedrock connection)
+    expect(mockStartSession).toHaveBeenCalledWith({
+      jobPosition: 'Software Engineer',
+      seniorityLevel: 'mid',
+      questionCategory: 'technical',
+      resumeSessionId: 'sess-resume',
     })
   })
 
@@ -200,8 +253,9 @@ describe('SpeakingModule resume flow', () => {
 
     fireEvent.click(screen.getByText('Mulai Sesi Baru'))
 
+    // After abandon, goes to select phase (overview page)
     await waitFor(() => {
-      expect(screen.getByText('Pilih Posisi Pekerjaan')).toBeInTheDocument()
+      expect(screen.getByText('Speaking Performance')).toBeInTheDocument()
     })
 
     expect(mockChat).toHaveBeenCalledWith({
@@ -238,9 +292,9 @@ describe('SpeakingModule resume flow', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Sesi lama tidak dapat ditutup')
     })
 
-    // Should still show JobPositionSelector
+    // Should still show overview page (select phase)
     await waitFor(() => {
-      expect(screen.getByText('Pilih Posisi Pekerjaan')).toBeInTheDocument()
+      expect(screen.getByText('Speaking Performance')).toBeInTheDocument()
     })
   })
 })
