@@ -58,9 +58,10 @@ export default function SpeakingModule() {
 
   const handleTranscript = useCallback((event: TranscriptEvent) => {
     setTranscripts((prev) => {
+      // Static partial ID per role — only one partial per role at a time
+      const partialId = `partial-${event.role}`
+
       if (event.partial) {
-        // Replace existing partial for this role, or add new
-        const partialId = `transcript-${event.role}-partial`
         const entry: TranscriptEntry = {
           id: partialId,
           role: event.role,
@@ -78,13 +79,12 @@ export default function SpeakingModule() {
         return [...prev, entry]
       }
 
-      // Final: remove partial for this role, add final entry
-      const partialId = `transcript-${event.role}-partial`
+      // Final: remove partial for this role, add permanent entry
       const filtered = prev.filter((t) => t.id !== partialId)
       return [
         ...filtered,
         {
-          id: `transcript-${event.role}-${transcriptIdCounterRef.current++}`,
+          id: `final-${event.role}-${transcriptIdCounterRef.current++}`,
           role: event.role,
           text: event.text,
           partial: false,
