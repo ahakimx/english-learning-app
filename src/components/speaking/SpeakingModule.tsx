@@ -53,38 +53,32 @@ export default function SpeakingModule() {
 
   // --- Nova Sonic hook callbacks ---
 
-  // Throttle transcript updates to max 4 per second to avoid re-render storms
-  const pendingTranscriptRef = useRef<TranscriptEvent | null>(null)
-  const transcriptThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Ref for playChunk — assigned after useAudioPlayback hook below
   const playChunkRef = useRef<(b64: string) => void | Promise<void>>(() => {})
 
-  const applyTranscriptUpdate = useCallback((event: TranscriptEvent) => {
-    const entryId = event.partial
-      ? `transcript-${event.role}-partial`
-      : `transcript-${event.role}-${transcriptIdCounterRef.current++}`
-
+  const handleTranscript = useCallback((event: TranscriptEvent) => {
     setTranscripts((prev) => {
       if (event.partial) {
-        const existingIdx = prev.findIndex(
-          (t) => t.id === entryId && t.partial,
-        )
+        // Replace existing partial for this role, or add new
+        const partialId = `transcript-${event.role}-partial`
         const entry: TranscriptEntry = {
-          id: entryId,
+          id: partialId,
           role: event.role,
           text: event.text,
           partial: true,
           timestamp: event.timestamp,
           questionId: currentQuestionIdRef.current,
         }
-        if (existingIdx >= 0) {
+        const idx = prev.findIndex((t) => t.id === partialId)
+        if (idx >= 0) {
           const updated = [...prev]
-          updated[existingIdx] = entry
+          updated[idx] = entry
           return updated
         }
         return [...prev, entry]
       }
 
+      // Final: remove partial for this role, add final entry
       const partialId = `transcript-${event.role}-partial`
       const filtered = prev.filter((t) => t.id !== partialId)
       return [
@@ -100,35 +94,6 @@ export default function SpeakingModule() {
       ]
     })
   }, [])
-
-  const handleTranscript = useCallback((event: TranscriptEvent) => {
-    // Final transcripts apply immediately
-    if (!event.partial) {
-      if (transcriptThrottleRef.current) {
-        clearTimeout(transcriptThrottleRef.current)
-        transcriptThrottleRef.current = null
-      }
-      // Apply any pending partial first
-      if (pendingTranscriptRef.current) {
-        applyTranscriptUpdate(pendingTranscriptRef.current)
-        pendingTranscriptRef.current = null
-      }
-      applyTranscriptUpdate(event)
-      return
-    }
-
-    // Partial transcripts: throttle to max ~4/sec (250ms)
-    pendingTranscriptRef.current = event
-    if (!transcriptThrottleRef.current) {
-      transcriptThrottleRef.current = setTimeout(() => {
-        transcriptThrottleRef.current = null
-        if (pendingTranscriptRef.current) {
-          applyTranscriptUpdate(pendingTranscriptRef.current)
-          pendingTranscriptRef.current = null
-        }
-      }, 250)
-    }
-  }, [applyTranscriptUpdate])
 
   const handleAudio = useCallback((audioData: string) => {
     playChunkRef.current(audioData)

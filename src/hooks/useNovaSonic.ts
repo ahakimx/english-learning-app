@@ -112,6 +112,7 @@ export default function useNovaSonic(options: UseNovaSonicOptions): UseNovaSonic
     });
 
     socket.on('transcript', (data: { role: 'user' | 'ai'; text: string; partial: boolean }) => {
+      // Accumulate text per role
       if (data.role === 'ai') {
         currentAiTranscriptRef.current += data.text;
       } else {
@@ -126,51 +127,53 @@ export default function useNovaSonic(options: UseNovaSonicOptions): UseNovaSonic
         }
       }
 
+      // Emit accumulated text to UI
       callbacksRef.current.onTranscript({
         role: data.role,
-        text: data.text,
-        partial: data.partial,
+        text: data.role === 'ai' ? currentAiTranscriptRef.current : currentUserTranscriptRef.current,
+        partial: true,
         timestamp: Date.now(),
       });
     });
 
     socket.on('contentEnd', (data: { role: 'user' | 'ai' }) => {
       if (data.role === 'ai') {
-        // AI finished speaking — store transcript in history
-        if (currentAiTranscriptRef.current.trim()) {
-          conversationHistoryRef.current.push({
-            role: 'assistant',
-            text: currentAiTranscriptRef.current.trim(),
-            questionId: `q-${questionCountRef.current}`,
-          });
+        aiInterruptedRef.current = false;
+      } else if (data.role === 'user') {
+        // User turn ended — finalize transcripts only if we have accumulated text
+        const aiText = currentAiTranscriptRef.current.trim();
+        const userText = currentUserTranscriptRef.current.trim();
 
+        if (aiText) {
+          // Finalize AI transcript
           callbacksRef.current.onTranscript({
             role: 'ai',
-            text: currentAiTranscriptRef.current.trim(),
+            text: aiText,
             partial: false,
             timestamp: Date.now(),
           });
+          conversationHistoryRef.current.push({
+            role: 'assistant',
+            text: aiText,
+            questionId: `q-${questionCountRef.current}`,
+          });
+          currentAiTranscriptRef.current = '';
         }
-        currentAiTranscriptRef.current = '';
-        aiInterruptedRef.current = false;
-      } else if (data.role === 'user') {
-        const userText = currentUserTranscriptRef.current.trim();
+
         if (userText) {
+          // Finalize user transcript
           callbacksRef.current.onTranscript({
             role: 'user',
             text: userText,
             partial: false,
             timestamp: Date.now(),
           });
-
-          // Trigger feedback analysis
-          const questionText = currentAiTranscriptRef.current.trim() ||
-            (conversationHistoryRef.current.length > 0
-              ? conversationHistoryRef.current[conversationHistoryRef.current.length - 1]?.text ?? 'Interview question'
-              : 'Interview question');
-          triggerFeedbackAnalysis(questionText, userText);
+          const lastAssistant = conversationHistoryRef.current
+            .filter(t => t.role === 'assistant')
+            .pop();
+          triggerFeedbackAnalysis(lastAssistant?.text ?? 'Interview question', userText);
+          currentUserTranscriptRef.current = '';
         }
-        currentUserTranscriptRef.current = '';
 
         // Turn switches to AI
         currentSpeakerRef.current = 'ai';
