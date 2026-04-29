@@ -10,7 +10,7 @@ const criteriaLabels: Record<string, string> = {
 };
 
 /**
- * Maps a score (0–100) to a Tailwind color token.
+ * Maps a score (0–100) to a semantic color name.
  *   >= 80 → green (tertiary)
  *   >= 60 → blue (primary)
  *   >= 40 → gray (outline)
@@ -23,18 +23,91 @@ export function scoreColor(score: number): string {
   return 'red';
 }
 
-function barColorClass(score: number): string {
+/** Bar color class based on score, with special handling for filler words */
+function barColorClass(score: number, isFillerWords = false): string {
+  if (isFillerWords && score < 60) return 'bg-error';
   if (score >= 80) return 'bg-tertiary';
   if (score >= 60) return 'bg-primary';
   if (score >= 40) return 'bg-outline';
   return 'bg-error';
 }
 
-function textColorClass(score: number): string {
+/** Text color class based on score, with special handling for filler words */
+function textColorClass(score: number, isFillerWords = false): string {
+  if (isFillerWords && score < 60) return 'text-error';
   if (score >= 80) return 'text-tertiary';
   if (score >= 60) return 'text-primary';
   if (score >= 40) return 'text-outline';
   return 'text-error';
+}
+
+/** Category badge color mapping for collapsed state */
+function badgeStyle(key: string, score: number): string {
+  if (score >= 80) return 'bg-tertiary-container text-tertiary-fixed';
+  if (key === 'fillerWords' && score < 60) return 'bg-error-container text-on-error-container';
+  return 'bg-secondary-container text-on-secondary-container';
+}
+
+/** Short label for category badges */
+const badgeLabels: Record<string, string> = {
+  grammar: 'Grammar',
+  vocabulary: 'Vocab',
+  relevance: 'Relevance',
+  fillerWords: 'Filler',
+  coherence: 'Coherence',
+};
+
+/** Guess a category label for grammar corrections based on the rule text */
+function correctionCategoryLabel(rule: string): string {
+  const lower = rule.toLowerCase();
+  if (lower.includes('tone') || lower.includes('formal') || lower.includes('professional')) return 'Professional Tone';
+  if (lower.includes('agreement') || lower.includes('subject')) return 'Subject-Verb';
+  if (lower.includes('verb') || lower.includes('action')) return 'Action Verbs';
+  if (lower.includes('comparative') || lower.includes('superlative')) return 'Comparatives';
+  if (lower.includes('tense')) return 'Verb Tense';
+  return 'Grammar';
+}
+
+/** SVG circular score indicator */
+function CircularScore({ score, size }: { score: number; size: 'sm' | 'lg' }) {
+  const dim = size === 'sm' ? 48 : 64;
+  const cx = dim / 2;
+  const cy = dim / 2;
+  const strokeWidth = size === 'sm' ? 4 : 4;
+  const r = cx - strokeWidth - 2;
+  const circumference = 2 * Math.PI * r;
+  const offset = circumference - (score / 100) * circumference;
+  const gradientId = `score-grad-${size}`;
+
+  return (
+    <div className={`relative flex items-center justify-center`} style={{ width: dim, height: dim }}>
+      <svg className="w-full h-full transform -rotate-90" viewBox={`0 0 ${dim} ${dim}`}>
+        <defs>
+          <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#003461" />
+            <stop offset="100%" stopColor="#49d08f" />
+          </linearGradient>
+        </defs>
+        <circle
+          className="text-surface-variant"
+          cx={cx} cy={cy} r={r}
+          fill="transparent" stroke="currentColor" strokeWidth={strokeWidth}
+        />
+        <circle
+          cx={cx} cy={cy} r={r}
+          fill="transparent"
+          stroke={`url(#${gradientId})`}
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+        />
+      </svg>
+      <span className={`absolute font-extrabold text-primary ${size === 'sm' ? 'text-[10px]' : 'text-sm'}`}>
+        {score}
+      </span>
+    </div>
+  );
 }
 
 export default function InlineFeedbackCard({
@@ -47,174 +120,246 @@ export default function InlineFeedbackCard({
 
   const [grammarExpanded, setGrammarExpanded] = useState(false);
 
+  // --- COLLAPSED STATE ---
+  if (!expanded) {
+    return (
+      <div
+        className="mx-2 my-2 bg-surface-container-lowest rounded-lg overflow-hidden"
+        style={{ boxShadow: '0 10px 24px -4px rgba(25, 28, 29, 0.04)' }}
+        data-testid="inline-feedback-card"
+      >
+        <button
+          type="button"
+          className="w-full flex items-center gap-3 px-3 py-3 text-left hover:bg-surface-container/60 transition-colors group cursor-pointer"
+          onClick={onToggleExpand}
+          aria-expanded={expanded}
+          data-testid="feedback-toggle"
+        >
+          <div className="flex items-center gap-6 flex-1 min-w-0">
+            {/* Circular score indicator */}
+            <CircularScore score={scores.overall} size="sm" />
+
+            {/* Category badges */}
+            <div className="flex gap-2 flex-wrap" data-testid="overall-score">
+              {Object.entries(badgeLabels).map(([key, label]) => {
+                const score = scores[key as keyof typeof scores];
+                return (
+                  <span
+                    key={key}
+                    className={`px-2 py-1 text-[10px] rounded-md font-semibold ${badgeStyle(key, score)}`}
+                  >
+                    {label}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Show Details button */}
+          <span className="text-primary text-xs font-bold flex items-center gap-1 group-hover:underline whitespace-nowrap">
+            Show Details
+            <span className="material-symbols-outlined text-sm">expand_more</span>
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  // --- EXPANDED STATE ---
   return (
     <div
-      className="mx-2 my-2 bg-surface-container-low border border-outline-variant/20 rounded-xl overflow-hidden"
+      className="mx-2 my-2 bg-surface-container-lowest rounded-lg border-l-4 border-primary overflow-hidden"
+      style={{ boxShadow: '0 24px 48px -12px rgba(25, 28, 29, 0.08)' }}
       data-testid="inline-feedback-card"
     >
-      {/* Compact header — always visible */}
+      {/* Expandable header */}
       <button
         type="button"
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-container/60 transition-colors"
+        className="w-full flex items-center gap-3 px-6 py-4 text-left hover:bg-surface-container/60 transition-colors"
         onClick={onToggleExpand}
         aria-expanded={expanded}
         data-testid="feedback-toggle"
       >
-        <span className="material-symbols-outlined text-sm text-primary">assessment</span>
-        <span className="text-xs font-bold text-primary uppercase tracking-wider">Feedback</span>
-
-        {/* Overall score badge */}
-        <span
-          className={`ml-auto text-lg font-headline font-extrabold ${textColorClass(scores.overall)}`}
-          data-testid="overall-score"
-        >
-          {scores.overall}
-        </span>
-        <span className="text-[10px] text-on-surface-variant">/100</span>
-
-        <span
-          className={`material-symbols-outlined text-on-surface-variant text-sm transition-transform ${expanded ? 'rotate-180' : ''}`}
-        >
+        <div className="flex items-center gap-6 flex-1">
+          <CircularScore score={scores.overall} size="lg" />
+          <div>
+            <h4 className="text-primary font-headline font-bold" data-testid="overall-score">Session Analytics</h4>
+            <p className="text-xs text-on-surface-variant">Overall Score: {scores.overall}</p>
+          </div>
+        </div>
+        <span className="material-symbols-outlined text-on-surface-variant text-sm rotate-180">
           expand_more
         </span>
       </button>
 
       {/* Expanded detail section */}
-      {expanded && (
-        <div className="px-4 pb-4 space-y-4" data-testid="feedback-details">
-          {/* Criteria scores */}
-          <div className="space-y-2" data-testid="criteria-scores">
-            {Object.entries(criteriaLabels).map(([key, label]) => {
-              const score = scores[key as keyof typeof scores];
-              return (
-                <div key={key} className="space-y-1">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-semibold text-on-surface">{label}</span>
-                    <span className={`text-xs font-bold ${textColorClass(score)}`}>{score}</span>
-                  </div>
-                  <div
-                    className="h-1 w-full bg-surface-container-highest rounded-full overflow-hidden"
-                    role="progressbar"
-                    aria-valuenow={score}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-label={`${label} score`}
-                  >
-                    <div
-                      className={`h-full ${barColorClass(score)} rounded-full`}
-                      style={{ width: `${score}%` }}
-                    />
-                  </div>
+      <div className="px-6 pb-6 space-y-6" data-testid="feedback-details">
+        {/* 2-column criteria scores grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4" data-testid="criteria-scores">
+          {Object.entries(criteriaLabels).map(([key, label]) => {
+            const score = scores[key as keyof typeof scores];
+            const isFiller = key === 'fillerWords';
+            return (
+              <div key={key} className="space-y-1">
+                <div className="flex justify-between text-[11px] font-bold mb-1 uppercase tracking-wider">
+                  <span className="text-on-surface">{label}</span>
+                  <span className={textColorClass(score, isFiller)}>{score}%</span>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Grammar errors — collapsible */}
-          {grammarErrors.length > 0 && (
-            <div data-testid="grammar-errors-section">
-              <button
-                type="button"
-                className="flex items-center gap-2 w-full text-left py-1"
-                onClick={() => setGrammarExpanded((prev) => !prev)}
-                aria-expanded={grammarExpanded}
-                data-testid="grammar-errors-toggle"
-              >
-                <span className="material-symbols-outlined text-error text-sm">spellcheck</span>
-                <span className="text-xs font-bold text-on-surface">
-                  Grammar Errors ({grammarErrors.length})
-                </span>
-                <span
-                  className={`material-symbols-outlined text-on-surface-variant text-sm ml-auto transition-transform ${grammarExpanded ? 'rotate-180' : ''}`}
+                <div
+                  className="h-1 w-full bg-surface-variant rounded-full overflow-hidden"
+                  role="progressbar"
+                  aria-valuenow={score}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${label} score`}
                 >
-                  expand_more
-                </span>
-              </button>
+                  <div
+                    className={`h-full ${barColorClass(score, isFiller)} rounded-full`}
+                    style={{ width: `${score}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-              {grammarExpanded && (
-                <ul className="mt-1 space-y-2" data-testid="grammar-errors-list">
-                  {grammarErrors.map((err, i) => (
-                    <li
-                      key={i}
-                      className="p-2 bg-error-container/40 border border-error/10 rounded-lg text-xs list-none"
-                    >
-                      <p>
-                        <span className="line-through text-error">{err.original}</span>
-                        {' → '}
-                        <span className="font-medium text-tertiary">{err.correction}</span>
-                      </p>
-                      <p className="text-on-surface-variant mt-0.5">{err.rule}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
+        {/* Grammar corrections — table style from stitch design */}
+        {grammarErrors.length > 0 && (
+          <div data-testid="grammar-errors-section">
+            <button
+              type="button"
+              className="flex items-center gap-2 w-full text-left py-1 mb-2"
+              onClick={() => setGrammarExpanded((prev) => !prev)}
+              aria-expanded={grammarExpanded}
+              data-testid="grammar-errors-toggle"
+            >
+              <span className="text-sm font-extrabold uppercase tracking-widest text-on-surface-variant">
+                Grammar Corrections
+              </span>
+              <span className="text-xs text-on-surface-variant ml-1">({grammarErrors.length})</span>
+              <span
+                className={`material-symbols-outlined text-on-surface-variant text-sm ml-auto transition-transform ${grammarExpanded ? 'rotate-180' : ''}`}
+              >
+                expand_more
+              </span>
+            </button>
 
-          {/* Filler words */}
-          {fillerWordsDetected.length > 0 && (
-            <div data-testid="filler-words-section">
+            {grammarExpanded && (
+              <div className="bg-surface-container-low rounded-lg overflow-hidden" data-testid="grammar-errors-list">
+                {grammarErrors.map((err, i) => (
+                  <div
+                    key={i}
+                    role="listitem"
+                    className={`p-4 flex items-center justify-between ${i < grammarErrors.length - 1 ? 'border-b border-white/20' : ''}`}
+                  >
+                    <div className="flex-1 space-y-1">
+                      <span className="line-through text-on-surface-variant text-sm italic">
+                        &ldquo;{err.original}&rdquo;
+                      </span>
+                      <div className="text-tertiary font-semibold text-sm">
+                        &ldquo;{err.correction}&rdquo;
+                      </div>
+                    </div>
+                    <div className="ml-4 px-3 py-1 bg-surface-container-highest rounded text-[10px] font-bold text-primary whitespace-nowrap">
+                      {correctionCategoryLabel(err.rule)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Filler words detected — red accent border */}
+        {fillerWordsDetected.length > 0 && (
+          <div data-testid="filler-words-section">
+            <div className="p-3 bg-error-container/20 rounded-lg border-l-2 border-error">
               <div className="flex items-center gap-2 mb-1">
-                <span className="material-symbols-outlined text-secondary text-sm">
-                  record_voice_over
-                </span>
-                <span className="text-xs font-bold text-on-surface">Filler Words</span>
+                <span className="material-symbols-outlined text-error text-sm">record_voice_over</span>
+                <span className="text-[10px] font-bold uppercase text-error">Filler Words Detected</span>
               </div>
               <div className="flex flex-wrap gap-1" data-testid="filler-words-list">
                 {fillerWordsDetected.map((fw, i) => (
                   <span
                     key={i}
-                    className="inline-flex items-center gap-1 bg-secondary-container rounded-full px-2 py-0.5 text-[11px] text-on-secondary-container"
+                    className="inline-flex items-center gap-1 bg-error-container rounded-full px-2 py-0.5 text-[11px] text-on-error-container font-medium"
                   >
-                    {fw.word}
-                    <span className="bg-on-secondary-container text-secondary-container rounded-full px-1 text-[10px] font-medium">
+                    &ldquo;{fw.word}&rdquo;
+                    <span className="bg-error text-on-error rounded-full px-1 text-[10px] font-bold">
                       {fw.count}×
                     </span>
                   </span>
                 ))}
               </div>
+              <p className="text-xs text-on-surface-variant mt-2 leading-relaxed">
+                Focus on pausing for a breath instead of vocalizing fillers during technical explanations.
+              </p>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Suggestions */}
-          {suggestions.length > 0 && (
-            <div data-testid="suggestions-section">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="material-symbols-outlined text-primary text-sm">lightbulb</span>
-                <span className="text-xs font-bold text-on-surface">Suggestions</span>
-              </div>
-              <ul className="space-y-1" data-testid="suggestions-list">
-                {suggestions.map((s, i) => (
-                  <li
+        {/* 3-column suggestion cards with border-left accent */}
+        {suggestions.length > 0 && (
+          <div data-testid="suggestions-section">
+            <h5 className="text-sm font-extrabold uppercase tracking-widest text-on-surface-variant mb-3">
+              Suggestions
+            </h5>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4" data-testid="suggestions-list">
+              {suggestions.map((s, i) => {
+                const titles = ['Executive Presence', 'Quantify Impact', 'STAR Method'];
+                const title = titles[i % titles.length];
+                return (
+                  <div
                     key={i}
-                    className="text-xs text-on-surface-variant pl-3 border-l-2 border-primary/30 list-none"
+                    role="listitem"
+                    className="p-4 bg-surface-container-low rounded-lg border-l-4 border-primary"
                   >
-                    {s}
-                  </li>
-                ))}
-              </ul>
+                    <p className="text-xs font-bold text-primary mb-2">{title}</p>
+                    <p className="text-xs text-on-surface-variant leading-relaxed">{s}</p>
+                  </div>
+                );
+              })}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Improved answer */}
-          {improvedAnswer && (
-            <div data-testid="improved-answer-section">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="material-symbols-outlined text-tertiary text-sm">
-                  auto_awesome
-                </span>
-                <span className="text-xs font-bold text-on-surface">Improved Answer</span>
+        {/* Improved answer block */}
+        {improvedAnswer && (
+          <div data-testid="improved-answer-section">
+            <div className="p-4 bg-tertiary/5 rounded-lg border border-tertiary-fixed-dim/20">
+              <div className="flex items-center gap-2 mb-2 text-tertiary">
+                <span className="material-symbols-outlined text-sm">auto_awesome</span>
+                <span className="text-xs font-black uppercase tracking-widest">Model Executive Answer</span>
               </div>
               <blockquote
-                className="text-xs text-on-surface-variant italic pl-3 border-l-2 border-tertiary/30 leading-relaxed"
+                className="text-sm italic text-tertiary font-medium leading-relaxed"
                 data-testid="improved-answer"
               >
                 &ldquo;{improvedAnswer}&rdquo;
               </blockquote>
             </div>
-          )}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex gap-4 pt-4 border-t border-surface-container">
+          <button
+            type="button"
+            className="flex-1 bg-gradient-to-br from-primary to-primary-container text-white py-3 rounded-md font-bold text-sm shadow-md active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+            data-testid="next-question-button"
+          >
+            Next Question
+            <span className="material-symbols-outlined text-sm">arrow_forward</span>
+          </button>
+          <button
+            type="button"
+            className="px-6 py-3 border border-outline-variant text-on-surface-variant rounded-md font-bold text-sm hover:bg-surface-variant transition-colors"
+            data-testid="end-session-inline-button"
+          >
+            End Session
+          </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }

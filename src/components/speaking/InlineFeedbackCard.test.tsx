@@ -32,7 +32,15 @@ describe('InlineFeedbackCard', () => {
     render(
       <InlineFeedbackCard feedbackReport={baseFeedback} expanded={false} onToggleExpand={vi.fn()} />,
     );
-    expect(screen.getByTestId('overall-score')).toHaveTextContent('64');
+    // In collapsed state, the circular score indicator shows the score
+    // and category badges are rendered inside the overall-score container
+    const card = screen.getByTestId('inline-feedback-card');
+    expect(card).toHaveTextContent('64');
+    expect(card).toHaveTextContent('Grammar');
+    expect(card).toHaveTextContent('Vocab');
+    expect(card).toHaveTextContent('Relevance');
+    expect(card).toHaveTextContent('Filler');
+    expect(card).toHaveTextContent('Coherence');
   });
 
   it('calls onToggleExpand when header is clicked', () => {
@@ -77,7 +85,8 @@ describe('InlineFeedbackCard', () => {
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent('I has experience');
     expect(items[0]).toHaveTextContent('I have experience');
-    expect(items[0]).toHaveTextContent('Subject-verb agreement');
+    // New design shows a derived category label instead of the raw rule text
+    expect(items[0]).toHaveTextContent('Subject-Verb');
   });
 
   it('renders filler words with counts when expanded', () => {

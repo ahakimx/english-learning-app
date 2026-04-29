@@ -220,6 +220,61 @@ export default function SummaryReport({ summaryReport, sessionId, onNewSession }
         </section>
       )}
 
+      {/* Expert Insight Card */}
+      <section>
+        <div className="p-6 bg-gradient-to-br from-primary to-primary-container rounded-xl text-white space-y-4">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] opacity-70">Expert Insight</p>
+          <p className="text-sm font-semibold leading-relaxed">
+            &ldquo;Focus on the &lsquo;Why&rsquo; behind your decisions. Senior panels value rationale over syntax. Structure your answers to demonstrate strategic thinking and business impact.&rdquo;
+          </p>
+          <div className="flex items-center gap-3 pt-2">
+            <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center">
+              <span className="material-symbols-outlined text-sm text-white">person</span>
+            </div>
+            <span className="text-[10px] font-bold">Interview Coach • AI Mentor</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Pro Tips Section */}
+      <section>
+        <div className="flex items-center gap-4 mb-6">
+          <div className="w-10 h-10 rounded bg-surface-container-highest flex items-center justify-center">
+            <span className="material-symbols-outlined text-tertiary">lightbulb</span>
+          </div>
+          <h3 className="font-headline text-2xl font-bold text-on-surface">Pro Tips</h3>
+        </div>
+        <div className="space-y-4" data-testid="pro-tips">
+          <div className="p-5 bg-surface-container-highest rounded-lg border-l-4 border-tertiary">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="material-symbols-outlined text-tertiary text-lg">lightbulb</span>
+              <h4 className="text-xs font-extrabold text-on-tertiary-fixed-variant uppercase">STAR Method</h4>
+            </div>
+            <p className="text-sm text-on-surface-variant leading-relaxed">
+              Use the <span className="font-bold text-on-surface">STAR method</span> (Situation, Task, Action, Result) to structure your responses to situational questions. It ensures relevance and conciseness.
+            </p>
+          </div>
+          <div className="p-5 bg-surface-container-highest rounded-lg border-l-4 border-primary">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="material-symbols-outlined text-primary text-lg">timer</span>
+              <h4 className="text-xs font-extrabold text-primary uppercase">Pause Before Answering</h4>
+            </div>
+            <p className="text-sm text-on-surface-variant leading-relaxed">
+              Pause for 2 seconds before answering complex questions. It signals thoughtfulness and authority while giving you a moment to structure your response.
+            </p>
+          </div>
+          <div className="p-5 bg-surface-container-highest rounded-lg border-l-4 border-tertiary">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="material-symbols-outlined text-tertiary text-lg">bar_chart</span>
+              <h4 className="text-xs font-extrabold text-on-tertiary-fixed-variant uppercase">Quantify Your Impact</h4>
+            </div>
+            <p className="text-sm text-on-surface-variant leading-relaxed">
+              Whenever possible, use specific numbers and metrics to demonstrate your impact. &ldquo;Reduced latency by 40%&rdquo; is far more compelling than &ldquo;improved performance.&rdquo;
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Sticky Footer Actions */}
       <div className="fixed bottom-0 left-0 md:left-64 right-0 bg-white/80 backdrop-blur-xl border-t border-slate-200/20 px-6 py-4 z-40">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row gap-4 justify-between items-center">

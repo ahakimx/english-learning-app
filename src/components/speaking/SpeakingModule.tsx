@@ -40,7 +40,6 @@ export default function SpeakingModule() {
 
   // Real-time interview state
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
-  const [feedbackCards, setFeedbackCards] = useState<Map<string, FeedbackReport>>(new Map())
   const [sessionDuration, setSessionDuration] = useState(0)
   const [questionCount, setQuestionCount] = useState(0)
   const [currentQuestionNumber, setCurrentQuestionNumber] = useState(0)
@@ -109,16 +108,9 @@ export default function SpeakingModule() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentQuestionNumber])
 
-  const handleFeedback = useCallback((report: FeedbackReport) => {
-    const qId = currentQuestionIdRef.current
-    setFeedbackCards((prev) => {
-      const next = new Map(prev)
-      next.set(qId, report)
-      return next
-    })
-    // Count filler words from the report
-    const totalFillers = report.fillerWordsDetected.reduce((sum, fw) => sum + fw.count, 0)
-    setFillerWordCount((prev) => prev + totalFillers)
+  const handleFeedback = useCallback((_report: FeedbackReport) => {
+    // Feedback is only shown in the summary at the end of the session,
+    // not inline during the conversation.
   }, [])
 
   const handleNovaSonicError = useCallback((err: NovaSonicError) => {
@@ -222,7 +214,6 @@ export default function SpeakingModule() {
 
       // Reset interview state
       setTranscripts([])
-      setFeedbackCards(new Map())
       setSessionDuration(0)
       setQuestionCount(0)
       setCurrentQuestionNumber(1)
@@ -290,7 +281,6 @@ export default function SpeakingModule() {
 
       // Restore transcript state from previous questions
       const restoredTranscripts: TranscriptEntry[] = []
-      const restoredFeedback = new Map<string, FeedbackReport>()
       let counter = 0
 
       for (const q of questions) {
@@ -315,14 +305,9 @@ export default function SpeakingModule() {
             questionId: qId,
           })
         }
-        // Add feedback if available
-        if (q.feedback) {
-          restoredFeedback.set(qId, q.feedback)
-        }
       }
 
       setTranscripts(restoredTranscripts)
-      setFeedbackCards(restoredFeedback)
       setQuestionCount(questions.length)
       setCurrentQuestionNumber(questions.length)
       setFillerWordCount(0)
@@ -371,7 +356,6 @@ export default function SpeakingModule() {
     setIsAbandoning(false)
     setError(null)
     setTranscripts([])
-    setFeedbackCards(new Map())
     setSessionDuration(0)
     setQuestionCount(0)
     setCurrentQuestionNumber(0)
@@ -730,7 +714,7 @@ export default function SpeakingModule() {
                   <LiveTranscriptPanel
                     transcripts={transcripts}
                     currentTurn={novaSonic.currentTurn}
-                    feedbackCards={feedbackCards}
+                    feedbackCards={new Map()}
                   />
                 </div>
 
