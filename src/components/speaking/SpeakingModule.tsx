@@ -50,6 +50,9 @@ export default function SpeakingModule() {
   const transcriptIdCounterRef = useRef(0)
   const currentQuestionIdRef = useRef<string>('q-0')
 
+  // Collected feedback reports — shown only in the summary at session end
+  const feedbackReportsRef = useRef<FeedbackReport[]>([])
+
   // --- Nova Sonic hook callbacks ---
 
   // Ref for playChunk — assigned after useAudioPlayback hook below
@@ -108,9 +111,9 @@ export default function SpeakingModule() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentQuestionNumber])
 
-  const handleFeedback = useCallback((_report: FeedbackReport) => {
-    // Feedback is only shown in the summary at the end of the session,
-    // not inline during the conversation.
+  const handleFeedback = useCallback((report: FeedbackReport) => {
+    // Collect feedback for the summary — not shown inline during conversation
+    feedbackReportsRef.current.push(report)
   }, [])
 
   const handleNovaSonicError = useCallback((err: NovaSonicError) => {
@@ -218,6 +221,7 @@ export default function SpeakingModule() {
       setQuestionCount(0)
       setCurrentQuestionNumber(1)
       setFillerWordCount(0)
+      feedbackReportsRef.current = []
       transcriptIdCounterRef.current = 0
       currentQuestionIdRef.current = `q-${Date.now()}`
 
@@ -360,6 +364,7 @@ export default function SpeakingModule() {
     setQuestionCount(0)
     setCurrentQuestionNumber(0)
     setFillerWordCount(0)
+    feedbackReportsRef.current = []
   }
 
   // Map connection state for SessionInfoPanel
@@ -756,6 +761,7 @@ export default function SpeakingModule() {
                 summaryReport={summaryReport}
                 sessionId={sessionId}
                 onNewSession={handleNewSession}
+                feedbackReports={feedbackReportsRef.current}
               />
             </div>
           )}

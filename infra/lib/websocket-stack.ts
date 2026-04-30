@@ -57,8 +57,10 @@ export class WebSocketStack extends cdk.Stack {
       memorySize: 512,
       environment: {
         SESSIONS_TABLE_NAME: storage.sessionsTableName,
-        BEDROCK_MODEL_ID: 'amazon.nova-2-sonic-v1:0',
-        HAIKU_MODEL_ID: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+        BEDROCK_SONIC_MODEL_ID: process.env.BEDROCK_SONIC_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0',
+        BEDROCK_MODEL_ID: process.env.BEDROCK_SONIC_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0',
+        BEDROCK_TEXT_MODEL_ID: process.env.BEDROCK_TEXT_MODEL_ID ?? 'amazon.nova-pro-v1:0',
+        HAIKU_MODEL_ID: process.env.BEDROCK_TEXT_MODEL_ID ?? 'amazon.nova-pro-v1:0',
       },
     });
 

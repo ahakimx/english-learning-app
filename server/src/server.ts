@@ -30,7 +30,7 @@ import type { SeniorityLevel, QuestionCategory } from './promptBuilder.js';
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
 const BEDROCK_REGION = process.env.AWS_REGION ?? 'us-east-1';
-const BEDROCK_MODEL_ID = process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0';
+const BEDROCK_MODEL_ID = process.env.BEDROCK_SONIC_MODEL_ID ?? process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0';
 const VOICE_ID = process.env.VOICE_ID ?? 'tiffany';
 
 // ---------------------------------------------------------------------------

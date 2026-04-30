@@ -1,14 +1,12 @@
-// Feedback Analyzer — uses Claude Haiku for structured feedback analysis
+// Feedback Analyzer — uses Bedrock text model for structured feedback analysis
 // Implements Requirements: 5.1, 5.2, 5.4, 5.5, 12.1, 12.2
 
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import type { FeedbackReport, SummaryReport, SeniorityLevel } from '../../../lib/types';
+import { invokeTextModelWithRetry } from '../../shared/bedrockInvoke';
 
-const bedrockClient = new BedrockRuntimeClient({});
+const TEXT_MODEL_ID = process.env.BEDROCK_TEXT_MODEL_ID ?? process.env.HAIKU_MODEL_ID ?? 'amazon.nova-pro-v1:0';
 
-const HAIKU_MODEL_ID = process.env.HAIKU_MODEL_ID ?? 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
-
-/** Timeout in milliseconds for a single Claude Haiku invocation */
+/** Timeout in milliseconds for a single invocation */
 const INVOKE_TIMEOUT_MS = 15_000;
 
 /** Maximum number of retry attempts after the initial call */
@@ -19,58 +17,14 @@ const MAX_RETRIES = 2;
 // ---------------------------------------------------------------------------
 
 /**
- * Invoke Claude Haiku with a system prompt and user prompt.
- * Rejects if the call takes longer than `INVOKE_TIMEOUT_MS`.
+ * Invoke the text model with retry logic via shared abstraction.
  */
-async function invokeHaiku(systemPrompt: string, userPrompt: string): Promise<string> {
-  const abortController = new AbortController();
-  const timer = setTimeout(() => abortController.abort(), INVOKE_TIMEOUT_MS);
-
-  try {
-    const response = await bedrockClient.send(
-      new InvokeModelCommand({
-        modelId: HAIKU_MODEL_ID,
-        contentType: 'application/json',
-        accept: 'application/json',
-        body: JSON.stringify({
-          anthropic_version: 'bedrock-2023-05-31',
-          max_tokens: 2000,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userPrompt }],
-        }),
-      }),
-      { abortSignal: abortController.signal },
-    );
-
-    const body = JSON.parse(new TextDecoder().decode(response.body));
-    return (body.content[0].text as string).trim();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Invoke Claude Haiku with retry logic.
- * - First attempt + up to MAX_RETRIES retries (total up to 3 attempts).
- * - Each attempt has a 15-second timeout.
- * - Returns the raw response text on success, or `null` after all attempts fail.
- */
-async function invokeHaikuWithRetry(systemPrompt: string, userPrompt: string): Promise<string | null> {
-  const totalAttempts = 1 + MAX_RETRIES; // initial + retries
-
-  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
-    try {
-      return await invokeHaiku(systemPrompt, userPrompt);
-    } catch (error) {
-      console.error(`Claude Haiku attempt ${attempt}/${totalAttempts} failed:`, error);
-      if (attempt === totalAttempts) {
-        return null;
-      }
-      // No additional delay between retries — the 15s timeout already provides spacing
-    }
-  }
-
-  return null;
+async function invokeWithRetry(systemPrompt: string, userPrompt: string): Promise<string | null> {
+  return invokeTextModelWithRetry(
+    { modelId: TEXT_MODEL_ID, systemPrompt, userPrompt, maxTokens: 2000 },
+    INVOKE_TIMEOUT_MS,
+    MAX_RETRIES,
+  );
 }
 
 /**
@@ -137,7 +91,7 @@ function normaliseFeedbackReport(raw: Record<string, unknown>): FeedbackReport {
 }
 
 /**
- * Build a default / fallback FeedbackReport used when Claude Haiku is
+ * Build a default / fallback FeedbackReport used when Bedrock text model is
  * unreachable after all retries.
  */
 function buildFallbackFeedbackReport(): FeedbackReport {
@@ -188,7 +142,7 @@ function normaliseSummaryReport(raw: Record<string, unknown>): SummaryReport {
 }
 
 /**
- * Build a default / fallback SummaryReport used when Claude Haiku is
+ * Build a default / fallback SummaryReport used when Bedrock text model is
  * unreachable after all retries.
  */
 function buildFallbackSummaryReport(feedbackReports: FeedbackReport[], questionCount: number): SummaryReport {
@@ -220,9 +174,9 @@ function buildFallbackSummaryReport(feedbackReports: FeedbackReport[], questionC
 // ---------------------------------------------------------------------------
 
 /**
- * Analyse a single user answer using Claude Haiku.
+ * Analyse a single user answer using Bedrock text model.
  *
- * - Builds a prompt asking Claude Haiku to evaluate the answer.
+ * - Builds a prompt asking Bedrock text model to evaluate the answer.
  * - Sends the prompt via InvokeModel with a 15-second timeout.
  * - Retries up to 2 times on failure.
  * - Falls back to a default FeedbackReport with "Analisis sedang diproses"
@@ -266,10 +220,10 @@ Candidate's Answer: "${userTranscript}"
 
 Analyze this answer and return the JSON assessment.`;
 
-  const responseText = await invokeHaikuWithRetry(systemPrompt, userPrompt);
+  const responseText = await invokeWithRetry(systemPrompt, userPrompt);
 
   if (responseText === null) {
-    console.warn('All Claude Haiku attempts failed — returning fallback FeedbackReport');
+    console.warn('All Bedrock text model attempts failed — returning fallback FeedbackReport');
     return buildFallbackFeedbackReport();
   }
 
@@ -286,7 +240,7 @@ Analyze this answer and return the JSON assessment.`;
  * Generate a summary report for the entire interview session.
  *
  * - Collects all FeedbackReports from the session.
- * - Sends them to Claude Haiku to produce a SummaryReport.
+ * - Sends them to Bedrock text model to produce a SummaryReport.
  * - Retries up to 2 times on failure.
  * - Falls back to a computed SummaryReport if all attempts fail.
  *
@@ -332,10 +286,10 @@ ${JSON.stringify(feedbackSummaries, null, 2)}
 
 Generate the summary report JSON.`;
 
-  const responseText = await invokeHaikuWithRetry(systemPrompt, userPrompt);
+  const responseText = await invokeWithRetry(systemPrompt, userPrompt);
 
   if (responseText === null) {
-    console.warn('All Claude Haiku attempts failed — returning fallback SummaryReport');
+    console.warn('All Bedrock text model attempts failed — returning fallback SummaryReport');
     return buildFallbackSummaryReport(feedbackReports, questionCount);
   }
 
