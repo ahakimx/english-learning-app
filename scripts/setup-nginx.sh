@@ -1,0 +1,26 @@
+#!/bin/bash
+set -e
+yum install -y nginx certbot python3-certbot-nginx
+cat > /etc/nginx/conf.d/sonic.conf << 'NGINXCONF'
+server {
+    listen 80;
+    server_name sonic.arkoda.cloud;
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+    }
+}
+NGINXCONF
+nginx -t
+systemctl start nginx
+systemctl enable nginx
+certbot --nginx -d sonic.arkoda.cloud --non-interactive --agree-tos --email admin@arkoda.cloud --redirect
+echo "NGINX_SSL_SETUP_COMPLETE"

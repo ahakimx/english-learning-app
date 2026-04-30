@@ -56,6 +56,7 @@ export class ApiStack extends cdk.Stack {
       environment: {
         SESSIONS_TABLE_NAME: storage.sessionsTableName,
         PROGRESS_TABLE_NAME: storage.progressTableName,
+        BEDROCK_TEXT_MODEL_ID: process.env.BEDROCK_TEXT_MODEL_ID ?? 'amazon.nova-pro-v1:0',
       },
     });
 

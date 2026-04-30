@@ -133,6 +133,7 @@ describe('ApiStack', () => {
           userPoolId: 'test-pool-id',
           userPoolClientId: 'test-client-id',
           userPoolArn: 'arn:aws:cognito-idp:us-east-1:123456789:userpool/test',
+          identityPoolId: 'us-east-1:test-identity-pool-id',
         },
         storage: {
           sessionsTableName: 'test-sessions',
@@ -233,7 +234,22 @@ describe('FrontendStack', () => {
 
   beforeAll(() => {
     const app = new cdk.App();
-    const stack = new FrontendStack(app, 'TestFrontendStack');
+    const stack = new FrontendStack(app, 'TestFrontendStack', {
+      auth: {
+        userPoolId: 'test-pool-id',
+        userPoolClientId: 'test-client-id',
+        userPoolArn: 'arn:aws:cognito-idp:us-east-1:123456789:userpool/test',
+        identityPoolId: 'us-east-1:test-identity-pool-id',
+      },
+      storage: {
+        sessionsTableName: 'test-sessions',
+        progressTableName: 'test-progress',
+        audioBucketName: 'test-audio-bucket',
+        audioBucketArn: 'arn:aws:s3:::test-audio-bucket',
+      },
+      apiUrl: 'https://test-api.execute-api.us-east-1.amazonaws.com/prod/',
+      webSocketUrl: 'wss://test-ws.execute-api.us-east-1.amazonaws.com/production',
+    });
     template = Template.fromStack(stack);
   });
 

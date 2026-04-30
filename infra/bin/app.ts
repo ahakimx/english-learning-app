@@ -5,6 +5,8 @@ import { AuthStack } from '../lib/auth-stack';
 import { StorageStack } from '../lib/storage-stack';
 import { ApiStack } from '../lib/api-stack';
 import { FrontendStack } from '../lib/frontend-stack';
+import { WebSocketStack } from '../lib/websocket-stack';
+import { SonicServerStack } from '../lib/sonic-server-stack';
 
 const app = new cdk.App();
 
@@ -29,10 +31,33 @@ const apiStack = new ApiStack(app, 'EnglishLearningApp-ApiStack', {
 apiStack.addDependency(authStack);
 apiStack.addDependency(storageStack);
 
-// 4. Frontend Stack — Amplify Hosting (depends on Auth + Storage + API)
+// 4. WebSocket Stack — WebSocket API Gateway + Lambda (depends on Auth + Storage)
+const webSocketStack = new WebSocketStack(app, 'EnglishLearningApp-WebSocketStack', {
+  description: 'English Learning App - WebSocket API (Nova Sonic Real-Time Speaking)',
+  wsProps: {
+    auth: authStack.outputs,
+    storage: storageStack.outputs,
+  },
+});
+webSocketStack.addDependency(authStack);
+webSocketStack.addDependency(storageStack);
+
+// 5. Sonic Server Stack — Nova Sonic proxy server on EC2 t3.micro (~$8/month)
+const sonicServerStack = new SonicServerStack(app, 'EnglishLearningApp-SonicServerStack', {
+  description: 'English Learning App - Nova Sonic Proxy Server (EC2)',
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION ?? 'us-east-1',
+  },
+});
+
+// 6. Frontend Stack — Amplify Hosting
+// Note: sonicServerUrl will be set manually in Amplify console after EC2 deploys
+// because cross-stack references require same account/region env config.
 new FrontendStack(app, 'EnglishLearningApp-FrontendStack', {
   description: 'English Learning App - Frontend Hosting (Amplify)',
   auth: authStack.outputs,
   storage: storageStack.outputs,
   apiUrl: apiStack.apiUrl,
+  webSocketUrl: webSocketStack.webSocketUrl,
 });

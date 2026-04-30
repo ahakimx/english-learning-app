@@ -1,11 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { chat } from '../../services/apiClient'
-import type { ChatResponse, SummaryReport as SummaryReportType, SeniorityLevel, QuestionCategory, QuestionType, SessionData } from '../../types'
+import useNovaSonic from '../../hooks/useNovaSonic'
+import { useAudioCapture } from '../../hooks/useAudioCapture'
+import { useAudioPlayback } from '../../hooks/useAudioPlayback'
+import type {
+  SummaryReport as SummaryReportType,
+  SeniorityLevel,
+  QuestionCategory,
+  SessionData,
+  TranscriptEntry,
+  FeedbackReport,
+  TranscriptEvent,
+  TurnEvent,
+  NovaSonicError,
+} from '../../types'
 import JobPositionSelector from './JobPositionSelector'
-import InterviewSession from './InterviewSession'
 import SummaryReport from './SummaryReport'
 import ResumePrompt from './ResumePrompt'
+import LiveTranscriptPanel from './LiveTranscriptPanel'
+import SessionInfoPanel from './SessionInfoPanel'
 import Sidebar from '../dashboard/Sidebar'
 
 type Phase = 'checking' | 'resume-prompt' | 'select' | 'loading' | 'interview' | 'summary'
@@ -15,17 +29,154 @@ export default function SpeakingModule() {
   const [phase, setPhase] = useState<Phase>('checking')
   const [error, setError] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const [currentQuestion, setCurrentQuestion] = useState<string | null>(null)
   const [selectedPosition, setSelectedPosition] = useState<string | null>(null)
   const [summaryReport, setSummaryReport] = useState<SummaryReportType | null>(null)
   const [selectedSeniority, setSelectedSeniority] = useState<SeniorityLevel | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<QuestionCategory | null>(null)
-  const [currentQuestionType, setCurrentQuestionType] = useState<QuestionType | undefined>(undefined)
   const [resumeSessionData, setResumeSessionData] = useState<SessionData | null>(null)
   const [isAbandoning, setIsAbandoning] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showPositionSelector, setShowPositionSelector] = useState(false)
 
+  // Real-time interview state
+  const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
+  const [sessionDuration, setSessionDuration] = useState(0)
+  const [questionCount, setQuestionCount] = useState(0)
+  const [currentQuestionNumber, setCurrentQuestionNumber] = useState(0)
+  const [fillerWordCount, setFillerWordCount] = useState(0)
+
+  const sessionStartTimeRef = useRef<number | null>(null)
+  const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const transcriptIdCounterRef = useRef(0)
+  const currentQuestionIdRef = useRef<string>('q-0')
+
+  // Collected feedback reports — shown only in the summary at session end
+  const feedbackReportsRef = useRef<FeedbackReport[]>([])
+
+  // --- Nova Sonic hook callbacks ---
+
+  // Ref for playChunk — assigned after useAudioPlayback hook below
+  const playChunkRef = useRef<(b64: string) => void | Promise<void>>(() => {})
+
+  const handleTranscript = useCallback((event: TranscriptEvent) => {
+    setTranscripts((prev) => {
+      // Static partial ID per role — only one partial per role at a time
+      const partialId = `partial-${event.role}`
+
+      if (event.partial) {
+        const entry: TranscriptEntry = {
+          id: partialId,
+          role: event.role,
+          text: event.text,
+          partial: true,
+          timestamp: event.timestamp,
+          questionId: currentQuestionIdRef.current,
+        }
+        const idx = prev.findIndex((t) => t.id === partialId)
+        if (idx >= 0) {
+          const updated = [...prev]
+          updated[idx] = entry
+          return updated
+        }
+        return [...prev, entry]
+      }
+
+      // Final: remove partial for this role, add permanent entry
+      const filtered = prev.filter((t) => t.id !== partialId)
+      return [
+        ...filtered,
+        {
+          id: `final-${event.role}-${transcriptIdCounterRef.current++}`,
+          role: event.role,
+          text: event.text,
+          partial: false,
+          timestamp: event.timestamp,
+          questionId: currentQuestionIdRef.current,
+        },
+      ]
+    })
+  }, [])
+
+  const handleAudio = useCallback((audioData: string) => {
+    playChunkRef.current(audioData)
+  }, [])
+
+  const handleTurnChange = useCallback((event: TurnEvent) => {
+    if (event.currentSpeaker === 'ai' && !event.interrupted) {
+      // AI started speaking — possibly a new question
+      setCurrentQuestionNumber((prev) => prev + 1)
+      setQuestionCount((prev) => Math.max(prev, currentQuestionNumber + 1))
+      currentQuestionIdRef.current = `q-${Date.now()}`
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentQuestionNumber])
+
+  const handleFeedback = useCallback((report: FeedbackReport) => {
+    // Collect feedback for the summary — not shown inline during conversation
+    feedbackReportsRef.current.push(report)
+  }, [])
+
+  const handleNovaSonicError = useCallback((err: NovaSonicError) => {
+    setError(err.message)
+  }, [])
+
+  const handleSessionEnd = useCallback((summary: SummaryReportType) => {
+    setSummaryReport(summary)
+    stopDurationTimer()
+    stopAudioCapture()
+    stopAudioPlayback()
+    setPhase('summary')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // --- Hooks ---
+  const novaSonic = useNovaSonic({
+    onTranscript: handleTranscript,
+    onAudio: handleAudio,
+    onTurnChange: handleTurnChange,
+    onFeedback: handleFeedback,
+    onError: handleNovaSonicError,
+    onSessionEnd: handleSessionEnd,
+  })
+
+  const audioCapture = useAudioCapture({
+    onAudioChunk: useCallback((chunk: ArrayBuffer) => {
+      novaSonic.sendAudioChunk(chunk)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  })
+
+  const { playChunk, stop: stopAudioPlayback, error: audioPlaybackError } = useAudioPlayback()
+  playChunkRef.current = playChunk
+
+  const stopAudioCapture = audioCapture.stop
+
+  // --- Duration timer ---
+  function startDurationTimer() {
+    sessionStartTimeRef.current = Date.now()
+    setSessionDuration(0)
+    durationTimerRef.current = setInterval(() => {
+      if (sessionStartTimeRef.current) {
+        setSessionDuration(Math.floor((Date.now() - sessionStartTimeRef.current) / 1000))
+      }
+    }, 1000)
+  }
+
+  function stopDurationTimer() {
+    if (durationTimerRef.current) {
+      clearInterval(durationTimerRef.current)
+      durationTimerRef.current = null
+    }
+  }
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      stopDurationTimer()
+    }
+  }, [])
+
+  // --- Phase: checking (on mount) ---
   useEffect(() => {
     async function checkActiveSession() {
       try {
@@ -43,6 +194,7 @@ export default function SpeakingModule() {
     checkActiveSession()
   }, [])
 
+  // --- Handlers for select phase (REST API) ---
   async function handleSelectPosition(position: string, seniorityLevel: SeniorityLevel, questionCategory: QuestionCategory) {
     setPhase('loading')
     setError(null)
@@ -52,15 +204,31 @@ export default function SpeakingModule() {
     setShowPositionSelector(false)
 
     try {
-      const response: ChatResponse = await chat({
-        action: 'start_session',
+      // Start session — the hook handles both REST API session creation
+      // and direct Bedrock connection internally
+      await novaSonic.startSession({
         jobPosition: position,
         seniorityLevel,
         questionCategory,
       })
-      setSessionId(response.sessionId)
-      setCurrentQuestion(response.content)
-      setCurrentQuestionType(response.questionType)
+
+      // Start audio capture
+      await audioCapture.start()
+
+      // Reset interview state
+      setTranscripts([])
+      setSessionDuration(0)
+      setQuestionCount(0)
+      setCurrentQuestionNumber(1)
+      setFillerWordCount(0)
+      feedbackReportsRef.current = []
+      transcriptIdCounterRef.current = 0
+      currentQuestionIdRef.current = `q-${Date.now()}`
+
+      // Start duration timer
+      startDurationTimer()
+
+      setSessionId(`session-${Date.now()}`)
       setPhase('interview')
     } catch {
       setError('Gagal memulai sesi interview. Silakan coba lagi.')
@@ -68,40 +236,23 @@ export default function SpeakingModule() {
     }
   }
 
-  async function handleNextQuestion() {
-    if (!sessionId) return
-    setError(null)
-
-    try {
-      const response: ChatResponse = await chat({
-        action: 'next_question',
-        sessionId,
-      })
-      setCurrentQuestion(response.content)
-      setCurrentQuestionType(response.questionType)
-    } catch {
-      setError('Gagal mendapatkan pertanyaan berikutnya. Silakan coba lagi.')
-    }
-  }
-
+  // --- Handler for ending session ---
   async function handleEndSession() {
-    if (!sessionId) return
-    setError(null)
-
-    try {
-      const response: ChatResponse = await chat({
-        action: 'end_session',
-        sessionId,
-      })
-      if (response.summaryReport) {
-        setSummaryReport(response.summaryReport)
-      }
-      setPhase('summary')
-    } catch {
-      setError('Gagal mengakhiri sesi. Silakan coba lagi.')
-    }
+    audioCapture.stop()
+    stopAudioPlayback()
+    stopDurationTimer()
+    // endSession is now async — it calls REST API for summary
+    await novaSonic.endSession()
+    // The summary will come via the onSessionEnd callback
   }
 
+  // --- Handler for interrupt/barge-in ---
+  function handleInterrupt() {
+    novaSonic.interrupt()
+    stopAudioPlayback()
+  }
+
+  // --- Resume session handler (REST API for checking, then direct Bedrock for interview) ---
   async function handleResumeSession() {
     if (!resumeSessionData) return
 
@@ -118,41 +269,60 @@ export default function SpeakingModule() {
       return
     }
 
-    const lastQuestion = questions[questions.length - 1]
+    setPhase('loading')
 
-    if (!lastQuestion.transcription) {
-      setCurrentQuestion(lastQuestion.questionText)
-      setCurrentQuestionType(lastQuestion.questionType)
+    try {
+      // Start session with resume — the hook handles direct Bedrock connection
+      await novaSonic.startSession({
+        jobPosition: resumeSessionData.jobPosition,
+        seniorityLevel: resumeSessionData.seniorityLevel,
+        questionCategory: resumeSessionData.questionCategory,
+        resumeSessionId: resumeSessionData.sessionId,
+      })
+
+      // Start audio capture
+      await audioCapture.start()
+
+      // Restore transcript state from previous questions
+      const restoredTranscripts: TranscriptEntry[] = []
+      let counter = 0
+
+      for (const q of questions) {
+        const qId = q.questionId
+        // Add AI question transcript
+        restoredTranscripts.push({
+          id: `restored-ai-${counter++}`,
+          role: 'ai',
+          text: q.questionText,
+          partial: false,
+          timestamp: Date.now(),
+          questionId: qId,
+        })
+        // Add user answer transcript if available
+        if (q.transcription) {
+          restoredTranscripts.push({
+            id: `restored-user-${counter++}`,
+            role: 'user',
+            text: q.transcription,
+            partial: false,
+            timestamp: Date.now(),
+            questionId: qId,
+          })
+        }
+      }
+
+      setTranscripts(restoredTranscripts)
+      setQuestionCount(questions.length)
+      setCurrentQuestionNumber(questions.length)
+      setFillerWordCount(0)
+      transcriptIdCounterRef.current = counter
+      currentQuestionIdRef.current = `q-${Date.now()}`
+
+      startDurationTimer()
       setPhase('interview')
-    } else if (!lastQuestion.feedback) {
-      setPhase('loading')
-      try {
-        await chat({
-          action: 'analyze_answer',
-          sessionId: resumeSessionData.sessionId,
-          transcription: lastQuestion.transcription,
-        })
-        setCurrentQuestion(lastQuestion.questionText)
-        setCurrentQuestionType(lastQuestion.questionType)
-        setPhase('interview')
-      } catch {
-        setError('Gagal menganalisis jawaban terakhir. Silakan coba lagi.')
-        setPhase('select')
-      }
-    } else {
-      setPhase('loading')
-      try {
-        const response = await chat({
-          action: 'next_question',
-          sessionId: resumeSessionData.sessionId,
-        })
-        setCurrentQuestion(response.content)
-        setCurrentQuestionType(response.questionType)
-        setPhase('interview')
-      } catch {
-        setError('Gagal mendapatkan pertanyaan berikutnya. Silakan coba lagi.')
-        setPhase('select')
-      }
+    } catch {
+      setError('Gagal melanjutkan sesi interview. Silakan coba lagi.')
+      setPhase('select')
     }
   }
 
@@ -174,18 +344,36 @@ export default function SpeakingModule() {
   }
 
   function handleNewSession() {
+    // Disconnect Bedrock stream and cleanup
+    novaSonic.disconnect()
+    audioCapture.stop()
+    stopAudioPlayback()
+    stopDurationTimer()
+
     setPhase('select')
     setSessionId(null)
-    setCurrentQuestion(null)
     setSelectedPosition(null)
     setSelectedSeniority(null)
     setSelectedCategory(null)
     setSummaryReport(null)
-    setCurrentQuestionType(undefined)
     setResumeSessionData(null)
     setIsAbandoning(false)
     setError(null)
+    setTranscripts([])
+    setSessionDuration(0)
+    setQuestionCount(0)
+    setCurrentQuestionNumber(0)
+    setFillerWordCount(0)
+    feedbackReportsRef.current = []
   }
+
+  // Map connection state for SessionInfoPanel
+  const connectionStateForPanel: 'connected' | 'reconnecting' | 'disconnected' =
+    novaSonic.connectionState === 'connected'
+      ? 'connected'
+      : novaSonic.connectionState === 'connecting'
+        ? 'reconnecting'
+        : 'disconnected'
 
   return (
     <div className="min-h-screen bg-surface font-body text-on-surface">
@@ -220,7 +408,7 @@ export default function SpeakingModule() {
 
       {/* Main Content */}
       <main className="lg:ml-64 pt-16 min-h-screen">
-        <div className="max-w-7xl mx-auto p-4 md:p-10 space-y-8 md:space-y-10">
+        <div className={`mx-auto ${phase === 'interview' ? 'max-w-full p-2 md:p-4' : 'max-w-7xl p-4 md:p-10'} space-y-8 md:space-y-10`}>
           {error && (
             <div role="alert" className="mb-6 p-4 bg-error-container border border-error/20 rounded-lg text-on-error-container text-sm">
               {error}
@@ -486,27 +674,94 @@ export default function SpeakingModule() {
             </div>
           )}
 
-          {phase === 'interview' && currentQuestion && sessionId && selectedPosition && selectedSeniority && selectedCategory && (
-            <div className="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/20 p-6">
-              <InterviewSession
-                sessionId={sessionId}
-                jobPosition={selectedPosition}
-                seniorityLevel={selectedSeniority}
-                questionCategory={selectedCategory}
-                currentQuestion={currentQuestion}
-                questionType={currentQuestionType}
-                onNextQuestion={handleNextQuestion}
-                onEndSession={handleEndSession}
-              />
+          {/* ===== INTERVIEW PHASE — Real-time architecture ===== */}
+          {phase === 'interview' && selectedPosition && selectedSeniority && selectedCategory && (
+            <div className="flex flex-col h-[calc(100vh-5rem)]" data-testid="interview-realtime">
+              {/* Interview header bar */}
+              <div className="flex items-center justify-between px-4 py-3 bg-surface-container-lowest rounded-t-xl border border-outline-variant/10">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-primary">mic</span>
+                  <h2 className="text-lg font-headline font-bold text-primary">Live Interview</h2>
+                  <span className="text-xs text-on-surface-variant">
+                    {selectedPosition} · {selectedSeniority} · {selectedCategory}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Interrupt button — visible when AI is speaking */}
+                  {novaSonic.currentTurn === 'ai' && (
+                    <button
+                      type="button"
+                      onClick={handleInterrupt}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-secondary-container text-on-secondary-container rounded-lg text-sm font-bold hover:bg-surface-container-highest transition-colors"
+                      data-testid="interrupt-button"
+                    >
+                      <span className="material-symbols-outlined text-sm">front_hand</span>
+                      Interrupt
+                    </button>
+                  )}
+                  {/* End Session button */}
+                  <button
+                    type="button"
+                    onClick={handleEndSession}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-error-container text-on-error-container rounded-lg text-sm font-bold hover:bg-error/20 transition-colors"
+                    data-testid="end-session-button"
+                  >
+                    <span className="material-symbols-outlined text-sm">stop_circle</span>
+                    End Session
+                  </button>
+                </div>
+              </div>
+
+              {/* Main interview layout: 65% transcript + 35% session info */}
+              <div className="flex flex-1 gap-3 min-h-0 mt-2">
+                {/* Left panel — Live Transcript (65%) */}
+                <div className="w-[65%] min-h-0" data-testid="transcript-panel-container">
+                  <LiveTranscriptPanel
+                    transcripts={transcripts}
+                    currentTurn={novaSonic.currentTurn}
+                    feedbackCards={new Map()}
+                  />
+                </div>
+
+                {/* Right panel — Session Info (35%) */}
+                <div className="w-[35%] min-h-0" data-testid="session-info-container">
+                  <SessionInfoPanel
+                    jobPosition={selectedPosition}
+                    seniorityLevel={selectedSeniority}
+                    questionCategory={selectedCategory}
+                    sessionDuration={sessionDuration}
+                    questionCount={questionCount}
+                    currentQuestionNumber={currentQuestionNumber}
+                    fillerWordCount={fillerWordCount}
+                    connectionState={connectionStateForPanel}
+                  />
+                </div>
+              </div>
+
+              {/* Audio capture error */}
+              {audioCapture.error && (
+                <div role="alert" className="mt-2 p-3 bg-error-container border border-error/20 rounded-lg text-on-error-container text-sm">
+                  {audioCapture.error}
+                </div>
+              )}
+
+              {/* Audio playback error */}
+              {audioPlaybackError && (
+                <div role="alert" className="mt-2 p-3 bg-surface-container border border-outline-variant/20 rounded-lg text-on-surface-variant text-sm">
+                  {audioPlaybackError} — Menampilkan transkrip saja.
+                </div>
+              )}
             </div>
           )}
 
+          {/* ===== SUMMARY PHASE ===== */}
           {phase === 'summary' && summaryReport && sessionId && (
             <div className="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/20 p-6">
               <SummaryReport
                 summaryReport={summaryReport}
                 sessionId={sessionId}
                 onNewSession={handleNewSession}
+                feedbackReports={feedbackReportsRef.current}
               />
             </div>
           )}

@@ -78,6 +78,20 @@ export class AuthStack extends cdk.Stack {
       }),
     );
 
+    // Bedrock permission for authenticated users to connect directly to Nova Sonic
+    // from the browser via the Bedrock SDK (frontend-direct architecture).
+    // InvokeModelWithBidirectionalStream requires bedrock:InvokeModel per AWS docs.
+    authenticatedRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithBidirectionalStream',
+        ],
+        resources: ['*'],
+      }),
+    );
+
     // Attach role to Identity Pool
     new cognito.CfnIdentityPoolRoleAttachment(this, 'IdentityPoolRoleAttachment', {
       identityPoolId: identityPool.ref,

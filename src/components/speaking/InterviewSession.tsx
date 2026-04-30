@@ -63,7 +63,6 @@ export default function InterviewSession({
 
         audio.onerror = () => {
           if (!cancelled) {
-            // If audio fails to play, still move to recording
             setPhase('recording');
           }
         };
@@ -71,7 +70,6 @@ export default function InterviewSession({
         await audio.play();
       } catch {
         if (!cancelled) {
-          // If TTS fails, skip to recording phase
           setPhase('recording');
         }
       }
@@ -163,63 +161,78 @@ export default function InterviewSession({
   }, [sessionId, pendingTranscription]);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="text-xs font-medium text-blue-600 uppercase tracking-wide">
-            Posisi: {jobPosition}
-          </span>
-          <span className="text-xs font-medium text-purple-600 uppercase tracking-wide" data-testid="session-seniority">
-            Tingkat: {SENIORITY_LABELS[seniorityLevel]}
-          </span>
-          <span className="text-xs font-medium text-green-600 uppercase tracking-wide" data-testid="session-category">
-            Kategori: {CATEGORY_LABELS[questionCategory].label}
-          </span>
-          <span className="text-xs text-gray-400" data-testid="session-id">
-            Sesi: {sessionId}
-          </span>
+    <div className="flex flex-col gap-6">
+      {/* Metadata Header — Stitch breadcrumb + badges */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <nav className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-3">
+            <span>Mock Interview</span>
+            <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+            <span className="text-primary" data-testid="session-phase">
+              {phase === 'listening' && 'Mendengarkan pertanyaan...'}
+              {phase === 'recording' && 'Rekam jawaban Anda'}
+              {phase === 'processing' && 'Menganalisis jawaban...'}
+              {phase === 'feedback' && 'Hasil Feedback'}
+            </span>
+          </nav>
+          <h2 className="text-3xl font-headline font-extrabold text-primary tracking-tight">Active Interview</h2>
         </div>
-        <span
-          className="text-xs font-medium px-2 py-1 rounded-full bg-gray-100 text-gray-600"
-          data-testid="session-phase"
-        >
-          {phase === 'listening' && 'Mendengarkan pertanyaan...'}
-          {phase === 'recording' && 'Rekam jawaban Anda'}
-          {phase === 'processing' && 'Menganalisis jawaban...'}
-          {phase === 'feedback' && 'Hasil Feedback'}
-        </span>
+        <div className="flex flex-wrap gap-2">
+          <div className="bg-surface-container-low px-4 py-2 rounded-xl flex items-center gap-2 border border-outline-variant/10">
+            <span className="material-symbols-outlined text-sm text-primary">work</span>
+            <span className="text-xs font-semibold text-on-surface-variant">Posisi: {jobPosition}</span>
+          </div>
+          <div className="bg-surface-container-low px-4 py-2 rounded-xl flex items-center gap-2 border border-outline-variant/10" data-testid="session-seniority">
+            <span className="material-symbols-outlined text-sm text-primary">leaderboard</span>
+            <span className="text-xs font-semibold text-on-surface-variant">Tingkat: {SENIORITY_LABELS[seniorityLevel]}</span>
+          </div>
+          <div className="bg-surface-container-low px-4 py-2 rounded-xl flex items-center gap-2 border border-outline-variant/10" data-testid="session-category">
+            <span className="material-symbols-outlined text-sm text-primary">category</span>
+            <span className="text-xs font-semibold text-on-surface-variant">Kategori: {CATEGORY_LABELS[questionCategory].label}</span>
+          </div>
+          <div className="bg-surface-container-low px-4 py-2 rounded-xl flex items-center gap-2 border border-outline-variant/10" data-testid="session-id">
+            <span className="material-symbols-outlined text-sm text-outline">tag</span>
+            <span className="text-xs font-semibold text-on-surface-variant">Sesi: {sessionId}</span>
+          </div>
+        </div>
       </div>
 
-      {/* Question */}
-      <div className="bg-white border border-gray-200 rounded-lg p-5">
-        <h3 className="text-sm font-semibold text-gray-500 mb-2">Pertanyaan Interview</h3>
-        {questionType && (
-          <span
-            data-testid="question-type-badge"
-            className={`inline-block text-xs font-medium px-2.5 py-0.5 rounded-full mb-2 ${
-              questionType === 'introduction'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-purple-100 text-purple-700'
-            }`}
-          >
-            {questionType === 'introduction' ? 'Perkenalan' : 'Pertanyaan Lanjutan'}
-          </span>
-        )}
-        <p className="text-gray-800 leading-relaxed" data-testid="interview-question">
-          {currentQuestion}
-        </p>
+      {/* Question Area — Stitch card with Q indicator */}
+      <div className="bg-surface-container-lowest rounded-xl p-8 shadow-sm border border-outline-variant/5">
+        <div className="flex items-start gap-4">
+          <div className="mt-1 w-8 h-8 flex-shrink-0 bg-primary/10 text-primary rounded-full flex items-center justify-center font-bold font-headline">Q</div>
+          <div>
+            {questionType && (
+              <span
+                data-testid="question-type-badge"
+                className={`inline-block text-xs font-medium px-2.5 py-0.5 rounded-full mb-3 ${
+                  questionType === 'introduction'
+                    ? 'bg-primary-fixed text-primary'
+                    : 'bg-secondary-container text-on-secondary-container'
+                }`}
+              >
+                {questionType === 'introduction' ? 'Perkenalan' : 'Pertanyaan Lanjutan'}
+              </span>
+            )}
+            <h3 className="text-xl font-headline font-bold text-on-surface mb-4" data-testid="interview-question">
+              {currentQuestion}
+            </h3>
+            <p className="text-on-surface-variant leading-relaxed italic text-sm">
+              Pastikan untuk menggunakan metode STAR (Situation, Task, Action, Result) dalam jawaban Anda.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Error */}
       {error && (
-        <div role="alert" className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+        <div role="alert" className="p-4 bg-error-container border border-error/20 rounded-lg text-on-error-container text-sm">
           <p>{error}</p>
           {isTimeout && pendingTranscription && (
             <button
               type="button"
               onClick={handleRetryAnalysis}
-              className="mt-2 px-4 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 text-xs font-medium"
+              className="mt-2 px-4 py-1.5 bg-error text-on-error rounded hover:bg-error/90 focus:outline-none focus:ring-2 focus:ring-error focus:ring-offset-2 text-xs font-medium"
             >
               Coba Lagi
             </button>
@@ -227,17 +240,23 @@ export default function InterviewSession({
         </div>
       )}
 
-      {/* Listening phase */}
+      {/* Listening phase — Stitch waveform */}
       {phase === 'listening' && (
-        <div className="flex flex-col items-center py-8" role="status">
-          <div className="animate-pulse flex space-x-1 mb-3">
-            <span className="w-2 h-6 bg-blue-400 rounded" />
-            <span className="w-2 h-8 bg-blue-500 rounded" />
-            <span className="w-2 h-5 bg-blue-400 rounded" />
-            <span className="w-2 h-7 bg-blue-500 rounded" />
-            <span className="w-2 h-4 bg-blue-400 rounded" />
+        <div className="flex flex-col items-center justify-center py-12 bg-surface-container-lowest rounded-xl relative overflow-hidden" role="status">
+          <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
+          <div className="relative z-10 flex flex-col items-center">
+            <div className="animate-pulse flex items-end gap-1 mb-4 h-16">
+              <span className="w-1 h-4 bg-primary rounded-full" />
+              <span className="w-1 h-8 bg-primary rounded-full" />
+              <span className="w-1 h-12 bg-primary rounded-full" />
+              <span className="w-1 h-6 bg-primary rounded-full" />
+              <span className="w-1 h-10 bg-primary rounded-full" />
+              <span className="w-1 h-14 bg-primary rounded-full" />
+              <span className="w-1 h-8 bg-primary rounded-full" />
+              <span className="w-1 h-4 bg-primary rounded-full" />
+            </div>
+            <p className="text-sm text-on-surface-variant">Memutar audio pertanyaan...</p>
           </div>
-          <p className="text-sm text-gray-600">Memutar audio pertanyaan...</p>
         </div>
       )}
 
@@ -251,11 +270,11 @@ export default function InterviewSession({
         />
       )}
 
-      {/* Processing phase */}
+      {/* Processing phase — Stitch spinner */}
       {phase === 'processing' && (
-        <div className="flex flex-col items-center py-8" role="status">
-          <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-500 border-t-transparent mb-4" />
-          <p className="text-sm text-gray-600">Menganalisis jawaban Anda...</p>
+        <div className="flex flex-col items-center py-12" role="status">
+          <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary border-t-transparent mb-4" />
+          <p className="text-sm text-on-surface-variant">Menganalisis jawaban Anda...</p>
         </div>
       )}
 
@@ -269,23 +288,52 @@ export default function InterviewSession({
         <>
           <FeedbackDisplay feedbackReport={feedbackReport} />
 
-          <div className="flex gap-4 justify-center pt-4">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
             <button
               type="button"
               onClick={onNextQuestion}
-              className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm font-medium"
+              className="flex-1 sm:flex-none px-8 py-3 bg-gradient-to-br from-primary to-primary-container text-on-primary rounded-lg font-headline font-bold shadow-[0_10px_20px_-5px_rgba(0,52,97,0.3)] hover:translate-y-[-2px] transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 flex items-center justify-center gap-2"
             >
               Pertanyaan Berikutnya
+              <span className="material-symbols-outlined text-sm">arrow_forward</span>
             </button>
             <button
               type="button"
               onClick={onEndSession}
-              className="px-6 py-2.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 text-sm font-medium"
+              className="flex-1 sm:flex-none px-6 py-3 bg-secondary-container text-on-secondary-container rounded-lg font-headline font-bold hover:bg-surface-container-highest transition-colors focus:outline-none focus:ring-2 focus:ring-secondary focus:ring-offset-2 flex items-center justify-center gap-2"
             >
+              <span className="material-symbols-outlined text-sm">cancel</span>
               Akhiri Sesi
             </button>
           </div>
         </>
+      )}
+
+      {/* Tips Section — Stitch 3-column grid (visible during recording) */}
+      {phase === 'recording' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-2">
+          <div className="bg-surface-container p-6 rounded-xl flex items-start gap-4 border border-outline-variant/10">
+            <span className="material-symbols-outlined text-primary">lightbulb</span>
+            <div>
+              <h4 className="font-bold text-sm text-primary mb-1">Tips Eksekutif</h4>
+              <p className="text-xs text-on-surface-variant leading-relaxed">Fokus pada Impact dan Result. Gunakan angka nyata jika memungkinkan untuk memperkuat jawaban Anda.</p>
+            </div>
+          </div>
+          <div className="bg-surface-container p-6 rounded-xl flex items-start gap-4 border border-outline-variant/10">
+            <span className="material-symbols-outlined text-primary">visibility</span>
+            <div>
+              <h4 className="font-bold text-sm text-primary mb-1">Visual Cues</h4>
+              <p className="text-xs text-on-surface-variant leading-relaxed">Pertahankan kontak mata virtual dengan melihat ke arah kamera, bukan ke layar.</p>
+            </div>
+          </div>
+          <div className="bg-surface-container p-6 rounded-xl flex items-start gap-4 border border-outline-variant/10">
+            <span className="material-symbols-outlined text-primary">psychology</span>
+            <div>
+              <h4 className="font-bold text-sm text-primary mb-1">Analisis AI</h4>
+              <p className="text-xs text-on-surface-variant leading-relaxed">AI akan menilai intonasi suara, kecepatan bicara, dan penggunaan kata pengisi (filler words).</p>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

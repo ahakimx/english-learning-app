@@ -22,6 +22,12 @@ export interface ApiStackProps {
   storage: StorageStackOutputs;
 }
 
+/** WebSocket Stack inputs — depends on Auth and Storage stacks */
+export interface WebSocketStackProps {
+  auth: AuthStackOutputs;
+  storage: StorageStackOutputs;
+}
+
 // Shared backend type definitions
 
 export type SeniorityLevel = 'junior' | 'mid' | 'senior' | 'lead';
@@ -177,4 +183,106 @@ export interface SessionQuestion {
   transcription?: string;
   feedback?: FeedbackReport;
   answeredAt?: string;
+}
+
+// ============================================================
+// Nova Sonic WebSocket Message Protocol Types
+// ============================================================
+
+// --- Session & Conversation Types ---
+
+export interface SessionConfig {
+  jobPosition: string;
+  seniorityLevel: SeniorityLevel;
+  questionCategory: QuestionCategory;
+  resumeSessionId?: string; // untuk resume sesi
+}
+
+export interface TranscriptEvent {
+  role: 'user' | 'ai';
+  text: string;
+  partial: boolean; // true = masih streaming, false = final
+  timestamp: number;
+}
+
+export interface TurnEvent {
+  currentSpeaker: 'ai' | 'user';
+  interrupted: boolean;
+}
+
+export interface NovaSonicError {
+  code: 'CONNECTION_FAILED' | 'AUTH_EXPIRED' | 'SESSION_TIMEOUT' | 'NOVA_SONIC_ERROR';
+  message: string;
+  retryable: boolean;
+}
+
+export interface ConversationTurn {
+  role: 'user' | 'assistant';
+  text: string;
+  questionId: string;
+  feedback?: FeedbackReport;
+}
+
+// --- WebSocket Client → Server Messages ---
+
+export type ClientMessage =
+  | { type: 'start_session'; config: SessionConfig }
+  | { type: 'audio_chunk'; data: string } // base64 encoded PCM audio
+  | { type: 'end_session' }
+  | { type: 'interrupt' }
+  | { type: 'resume_session'; sessionId: string };
+
+// --- WebSocket Server → Client Messages ---
+
+export type ServerMessage =
+  | { type: 'session_started'; sessionId: string }
+  | { type: 'audio_chunk'; data: string } // base64 encoded audio from AI
+  | { type: 'transcript_event'; event: TranscriptEvent }
+  | { type: 'turn_event'; event: TurnEvent }
+  | { type: 'feedback_event'; questionId: string; report: FeedbackReport }
+  | { type: 'summary_event'; report: SummaryReport }
+  | { type: 'session_ended'; sessionId: string }
+  | { type: 'error'; error: NovaSonicError }
+  | { type: 'reconnecting'; attempt: number; maxAttempts: number }
+  | { type: 'auth_expired' };
+
+// --- Lambda Connection State (in-memory per connection) ---
+
+/** Placeholder for Nova Sonic bidirectional stream handle */
+export type BidirectionalStream = unknown;
+
+export interface ConnectionState {
+  connectionId: string;
+  userId: string;
+  sessionId: string | null;
+  sonicStream: BidirectionalStream | null;
+  promptName: string;
+  audioContentName: string;
+  conversationHistory: ConversationTurn[];
+  questionCount: number;
+  currentQuestionTranscript: string;
+  pendingFeedbacks: Map<string, Promise<FeedbackReport>>;
+}
+
+// --- DynamoDB Session Record (hybrid architecture) ---
+
+export interface SessionRecord {
+  // Existing fields
+  userId: string;           // Partition Key
+  sessionId: string;        // Sort Key
+  type: 'speaking' | 'grammar' | 'writing';
+  status: 'active' | 'completed' | 'abandoned' | 'expired';
+  jobPosition: string;
+  seniorityLevel: SeniorityLevel;
+  questionCategory: QuestionCategory;
+  questions: SessionQuestion[];
+  createdAt: string;        // ISO 8601
+  updatedAt: string;        // ISO 8601
+  summaryReport?: SummaryReport;
+
+  // New fields for hybrid architecture
+  architecture?: 'pipeline' | 'hybrid'; // default 'pipeline' for backward compat
+  connectionId?: string;     // WebSocket connection ID
+  conversationHistory?: ConversationTurn[]; // untuk reconnect/resume
+  totalDurationSeconds?: number; // durasi total sesi
 }

@@ -1,12 +1,11 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { ChatRequest, ChatResponse, FeedbackReport, SummaryReport, QuizData, WritingReviewData, SeniorityLevel, QuestionCategory, QuestionType, SessionData } from '../../lib/types';
+import { invokeTextModelWithTimeout } from '../shared/bedrockInvoke';
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
-const bedrockClient = new BedrockRuntimeClient({});
 
 const CORS_HEADERS = {
   'Content-Type': 'application/json',
@@ -41,7 +40,7 @@ const REQUIRED_FIELDS: Record<ChatRequest['action'], (keyof ChatRequest)[]> = {
   writing_review: ['sessionId', 'writingContent'],
 };
 
-const BEDROCK_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+const BEDROCK_MODEL_ID = process.env.BEDROCK_TEXT_MODEL_ID ?? 'amazon.nova-pro-v1:0';
 
 const SESSION_EXPIRY_HOURS = 24;
 
@@ -436,22 +435,10 @@ Candidate's Answer: "${transcription}"
 
 Analyze this answer and return the JSON assessment.`;
 
-  const bedrockResponse = await bedrockClient.send(
-    new InvokeModelCommand({
-      modelId: BEDROCK_MODEL_ID,
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-    })
+  const responseText = await invokeTextModelWithTimeout(
+    { modelId: BEDROCK_MODEL_ID, systemPrompt, userPrompt, maxTokens: 2000 },
+    15_000,
   );
-
-  const bedrockBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
-  const responseText = bedrockBody.content[0].text.trim();
 
   // 3. Parse the Bedrock JSON response into a FeedbackReport
   let feedbackReport: FeedbackReport;
@@ -532,21 +519,10 @@ async function handleNextQuestion(userId: string, request: ChatRequest): Promise
   const questionType: QuestionType = 'contextual';
   const prompt = buildContextualPrompt(jobPosition, seniorityLevel, questionCategory, questions, previousQuestions);
 
-  const bedrockResponse = await bedrockClient.send(
-    new InvokeModelCommand({
-      modelId: BEDROCK_MODEL_ID,
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 300,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
+  const questionText = await invokeTextModelWithTimeout(
+    { modelId: BEDROCK_MODEL_ID, userPrompt: prompt, maxTokens: 300 },
+    15_000,
   );
-
-  const bedrockBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
-  const questionText = bedrockBody.content[0].text.trim();
   const questionId = crypto.randomUUID();
 
   // 4. Add the new question to the session's questions array using list_append
@@ -642,22 +618,10 @@ ${JSON.stringify(feedbackSummaries, null, 2)}
 
 Generate the summary report JSON.`;
 
-  const bedrockResponse = await bedrockClient.send(
-    new InvokeModelCommand({
-      modelId: BEDROCK_MODEL_ID,
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-    })
+  const responseText = await invokeTextModelWithTimeout(
+    { modelId: BEDROCK_MODEL_ID, systemPrompt, userPrompt, maxTokens: 2000 },
+    15_000,
   );
-
-  const bedrockBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
-  const responseText = bedrockBody.content[0].text.trim();
 
   // 4. Parse the response into SummaryReport
   let summaryReport: SummaryReport;
@@ -721,21 +685,10 @@ Rules:
 - Exactly 1 option must be correct
 - The correctAnswer must exactly match one of the options`;
 
-  const bedrockResponse = await bedrockClient.send(
-    new InvokeModelCommand({
-      modelId: BEDROCK_MODEL_ID,
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
+  const responseText = await invokeTextModelWithTimeout(
+    { modelId: BEDROCK_MODEL_ID, userPrompt: prompt, maxTokens: 1000 },
+    15_000,
   );
-
-  const bedrockBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
-  const responseText = bedrockBody.content[0].text.trim();
 
   let parsedQuiz: { question: string; options: string[]; correctAnswer: string };
   try {
@@ -826,21 +779,10 @@ Provide a clear, educational explanation of why "${currentQuiz.correctAnswer}" i
 
 Return ONLY the explanation text, no JSON or formatting.`;
 
-  const bedrockResponse = await bedrockClient.send(
-    new InvokeModelCommand({
-      modelId: BEDROCK_MODEL_ID,
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
+  const explanation = await invokeTextModelWithTimeout(
+    { modelId: BEDROCK_MODEL_ID, userPrompt: prompt, maxTokens: 1000 },
+    15_000,
   );
-
-  const bedrockBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
-  const explanation = bedrockBody.content[0].text.trim();
 
   // Save quiz result to DynamoDB
   const quizResult = {
@@ -885,21 +827,10 @@ ${writingType === 'essay' ? 'The essay topic should be related to professional d
 
 Return ONLY the writing prompt text. Make it clear and specific so the student knows exactly what to write about.`;
 
-  const bedrockResponse = await bedrockClient.send(
-    new InvokeModelCommand({
-      modelId: BEDROCK_MODEL_ID,
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 500,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
+  const writingPrompt = await invokeTextModelWithTimeout(
+    { modelId: BEDROCK_MODEL_ID, userPrompt: prompt, maxTokens: 500 },
+    15_000,
   );
-
-  const bedrockBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
-  const writingPrompt = bedrockBody.content[0].text.trim();
 
   // Save writing session to DynamoDB
   await docClient.send(
@@ -982,22 +913,10 @@ Student's Writing:
 
 Analyze this writing and return the JSON assessment.`;
 
-  const bedrockResponse = await bedrockClient.send(
-    new InvokeModelCommand({
-      modelId: BEDROCK_MODEL_ID,
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-    })
+  const responseText = await invokeTextModelWithTimeout(
+    { modelId: BEDROCK_MODEL_ID, systemPrompt, userPrompt, maxTokens: 2000 },
+    15_000,
   );
-
-  const bedrockBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
-  const responseText = bedrockBody.content[0].text.trim();
 
   let writingReview: WritingReviewData;
   try {
