@@ -85,7 +85,7 @@ export class AppRunnerStack extends cdk.Stack {
             port: '3001',
             runtimeEnvironmentVariables: [
               { name: 'AWS_REGION', value: 'us-east-1' },
-              { name: 'BEDROCK_MODEL_ID', value: 'amazon.nova-2-sonic-v1:0' },
+              { name: 'BEDROCK_MODEL_ID', value: process.env.BEDROCK_SONIC_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0' },
             ],
           },
         },

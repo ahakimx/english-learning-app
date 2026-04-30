@@ -192,7 +192,7 @@ export class SonicServerStack extends cdk.Stack {
       'Restart=always',
       'RestartSec=5',
       'Environment=AWS_REGION=us-east-1',
-      'Environment=BEDROCK_MODEL_ID=amazon.nova-2-sonic-v1:0',
+      'Environment=BEDROCK_MODEL_ID=${BEDROCK_SONIC_MODEL_ID:-amazon.nova-2-sonic-v1:0}',
       'Environment=PORT=3001',
       '',
       '[Install]',

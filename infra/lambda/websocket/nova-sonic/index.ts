@@ -37,8 +37,8 @@ import type { SonicStreamHandle } from './sonicConnectionManager';
 // ---------------------------------------------------------------------------
 
 const SESSIONS_TABLE_NAME = process.env.SESSIONS_TABLE_NAME ?? '';
-const BEDROCK_MODEL_ID = process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0';
-const HAIKU_MODEL_ID = process.env.HAIKU_MODEL_ID ?? 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+const BEDROCK_MODEL_ID = process.env.BEDROCK_SONIC_MODEL_ID ?? process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0';
+const HAIKU_MODEL_ID = process.env.BEDROCK_TEXT_MODEL_ID ?? process.env.HAIKU_MODEL_ID ?? 'amazon.nova-pro-v1:0';
 const WEBSOCKET_ENDPOINT = process.env.WEBSOCKET_ENDPOINT ?? '';
 const AWS_REGION = process.env.AWS_REGION ?? 'us-east-1';
 

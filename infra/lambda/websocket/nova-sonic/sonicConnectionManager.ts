@@ -77,7 +77,7 @@ type InputStreamEvent = InvokeModelWithBidirectionalStreamInput;
 // ---------------------------------------------------------------------------
 
 const BEDROCK_MODEL_ID =
-  process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0';
+  process.env.BEDROCK_SONIC_MODEL_ID ?? process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0';
 
 /**
  * Nova Sonic connections have an 8-minute (480 s) hard limit.

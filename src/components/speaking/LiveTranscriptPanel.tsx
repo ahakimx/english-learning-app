@@ -1,5 +1,6 @@
-import { useRef, useEffect, useMemo } from 'react';
+import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import type { LiveTranscriptPanelProps, TranscriptEntry, FeedbackReport } from '../../types';
+import InlineFeedbackCard from './InlineFeedbackCard';
 
 /**
  * Deduplicate transcripts: when a final entry arrives with the same id
@@ -42,32 +43,6 @@ function WaveformIndicator() {
           }}
         />
       ))}
-    </div>
-  );
-}
-
-/** Placeholder for InlineFeedbackCard (will be created in Task 12.1) */
-function InlineFeedbackCardPlaceholder({ feedbackReport }: { feedbackReport: FeedbackReport }) {
-  return (
-    <div
-      data-testid="inline-feedback-card"
-      className="mx-4 my-2 p-4 bg-surface-container-low border border-outline-variant/20 rounded-xl"
-    >
-      <div className="flex items-center gap-2 mb-2">
-        <span className="material-symbols-outlined text-sm text-primary">assessment</span>
-        <span className="text-xs font-bold text-primary uppercase tracking-wider">Feedback</span>
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="text-2xl font-headline font-extrabold text-on-surface">
-          {feedbackReport.scores.overall}
-        </span>
-        <span className="text-xs text-on-surface-variant">/100</span>
-      </div>
-      {feedbackReport.suggestions.length > 0 && (
-        <p className="text-xs text-on-surface-variant mt-1 line-clamp-2">
-          {feedbackReport.suggestions[0]}
-        </p>
-      )}
     </div>
   );
 }
@@ -138,6 +113,15 @@ export default function LiveTranscriptPanel({
   feedbackCards,
 }: LiveTranscriptPanelProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [expandedCards, setExpandedCards] = useState<Map<string, boolean>>(new Map());
+
+  const toggleCardExpanded = useCallback((questionId: string) => {
+    setExpandedCards(prev => {
+      const next = new Map(prev);
+      next.set(questionId, !prev.get(questionId));
+      return next;
+    });
+  }, []);
 
   // Deduplicate: partial-to-final replacement
   const dedupedTranscripts = useMemo(
@@ -240,9 +224,11 @@ export default function LiveTranscriptPanel({
         {renderedItems.map((item) => {
           if (item.type === 'feedback') {
             return (
-              <InlineFeedbackCardPlaceholder
+              <InlineFeedbackCard
                 key={`feedback-${item.questionId}`}
                 feedbackReport={item.report}
+                expanded={!!expandedCards.get(item.questionId)}
+                onToggleExpand={() => toggleCardExpanded(item.questionId)}
               />
             );
           }
