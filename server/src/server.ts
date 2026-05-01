@@ -565,9 +565,12 @@ async function processOutputStream(
         const trackedRole = contentEnd.contentId ? contentRoles.get(contentEnd.contentId) : undefined;
         console.log(`[Socket.IO] [${socket.id}] contentEnd: contentId=${contentEnd.contentId}, trackedRole=${trackedRole}, type=${contentEnd.type}, stopReason=${contentEnd.stopReason}`);
 
-        // Only emit contentEnd to client for FULL turn ends, not PARTIAL_TURN
-        // PARTIAL_TURN means more content blocks coming for the same turn
-        if (contentEnd.stopReason !== 'PARTIAL_TURN') {
+        // Emit contentEnd for full turn ends AND for PARTIAL_TURN text blocks
+        // PARTIAL_TURN text blocks need contentEnd so frontend can finalize transcript
+        const isTextBlock = contentEnd.type === 'TEXT' || (contentEnd.contentId ? contentTypes.get(contentEnd.contentId) === 'TEXT' : false);
+        const shouldEmit = contentEnd.stopReason !== 'PARTIAL_TURN' || isTextBlock;
+
+        if (shouldEmit) {
           if (trackedRole === 'ASSISTANT') {
             socket.emit('contentEnd', { role: 'ai' });
             session.interrupted = false;
