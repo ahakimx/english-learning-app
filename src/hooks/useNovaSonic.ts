@@ -204,39 +204,7 @@ export default function useNovaSonic(
       socket.on('contentEnd', (data: { role: 'user' | 'ai' }) => {
         if (data.role === 'ai') {
           aiInterruptedRef.current = false;
-
-          // Finalize AI transcript and reset accumulator to prevent double text
-          const aiText = currentAiTranscriptRef.current.trim();
-          if (aiText) {
-            callbacksRef.current.onTranscript({
-              role: 'ai',
-              text: aiText,
-              partial: false,
-              timestamp: Date.now(),
-            });
-            conversationHistoryRef.current.push({
-              role: 'assistant',
-              text: aiText,
-              questionId: `q-${questionCountRef.current}`,
-            });
-            currentAiTranscriptRef.current = '';
-          }
         } else if (data.role === 'user') {
-          // Finalize user transcript and reset accumulator
-          const userText = currentUserTranscriptRef.current.trim();
-          if (userText) {
-            callbacksRef.current.onTranscript({
-              role: 'user',
-              text: userText,
-              partial: false,
-              timestamp: Date.now(),
-            });
-            const lastAssistant = conversationHistoryRef.current
-              .filter((t) => t.role === 'assistant').pop();
-            triggerFeedbackAnalysis(lastAssistant?.text ?? 'Interview question', userText);
-            currentUserTranscriptRef.current = '';
-          }
-
           currentSpeakerRef.current = 'ai';
           setCurrentTurn('ai');
           callbacksRef.current.onTurnChange({
