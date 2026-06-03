@@ -175,7 +175,12 @@ describe('SpeakingModule resume flow', () => {
     })
     renderSpeakingModule()
 
-    // After checking, the overview page appears (select phase without showPositionSelector)
+    // After checking, the mode-select phase appears first (JD targeting flow)
+    await waitFor(() => {
+      expect(screen.getByText('Mode Cepat')).toBeInTheDocument()
+    })
+    // Select Quick mode to proceed to overview
+    fireEvent.click(screen.getByText('Lanjutkan'))
     await waitFor(() => {
       expect(screen.getByText('Speaking Performance')).toBeInTheDocument()
     })
@@ -185,7 +190,12 @@ describe('SpeakingModule resume flow', () => {
     mockChat.mockRejectedValue(new Error('Network error'))
     renderSpeakingModule()
 
-    // After error, falls back to select phase (overview page)
+    // After error, falls back to mode-select phase first (JD targeting flow)
+    await waitFor(() => {
+      expect(screen.getByText('Mode Cepat')).toBeInTheDocument()
+    })
+    // Select Quick mode to proceed to overview
+    fireEvent.click(screen.getByText('Lanjutkan'))
     await waitFor(() => {
       expect(screen.getByText('Speaking Performance')).toBeInTheDocument()
     })
@@ -253,7 +263,12 @@ describe('SpeakingModule resume flow', () => {
 
     fireEvent.click(screen.getByText('Mulai Sesi Baru'))
 
-    // After abandon, goes to select phase (overview page)
+    // After abandon, goes to mode-select phase first (JD targeting flow)
+    await waitFor(() => {
+      expect(screen.getByText('Mode Cepat')).toBeInTheDocument()
+    })
+    // Select Quick mode to proceed to overview
+    fireEvent.click(screen.getByText('Lanjutkan'))
     await waitFor(() => {
       expect(screen.getByText('Speaking Performance')).toBeInTheDocument()
     })
@@ -292,7 +307,12 @@ describe('SpeakingModule resume flow', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Sesi lama tidak dapat ditutup')
     })
 
-    // Should still show overview page (select phase)
+    // Should still show mode-select phase (JD targeting flow)
+    await waitFor(() => {
+      expect(screen.getByText('Mode Cepat')).toBeInTheDocument()
+    })
+    // Select Quick mode to proceed to overview
+    fireEvent.click(screen.getByText('Lanjutkan'))
     await waitFor(() => {
       expect(screen.getByText('Speaking Performance')).toBeInTheDocument()
     })

@@ -14,6 +14,7 @@ jest.mock('@aws-sdk/lib-dynamodb', () => ({
   PutCommand: jest.fn((params: unknown) => ({ _type: 'PutCommand', params })),
   GetCommand: jest.fn((params: unknown) => ({ _type: 'GetCommand', params })),
   UpdateCommand: jest.fn((params: unknown) => ({ _type: 'UpdateCommand', params })),
+  QueryCommand: jest.fn((params: unknown) => ({ _type: 'QueryCommand', params })),
 }));
 
 jest.mock('@aws-sdk/client-bedrock-runtime', () => ({
@@ -33,12 +34,12 @@ const printableStringArb = fc.stringOf(
 const answeredQuestionArb = fc.record({
   questionText: printableStringArb,
   transcription: printableStringArb,
-  questionType: fc.constantFrom('contextual' as const, 'random' as const),
+  questionType: fc.constantFrom('contextual' as const, 'introduction' as const),
 });
 
 const unansweredQuestionArb = fc.record({
   questionText: printableStringArb,
-  questionType: fc.constantFrom('contextual' as const, 'random' as const),
+  questionType: fc.constantFrom('contextual' as const, 'introduction' as const),
 });
 
 const seniorityArb = fc.constantFrom('junior' as const, 'mid' as const, 'senior' as const, 'lead' as const);
@@ -117,7 +118,7 @@ describe('Feature: hybrid-interview-questions, Property 2: contextual prompt con
 // **Validates: Requirements 1.3**
 // ============================================================================
 describe('Feature: hybrid-interview-questions, Property 3: no-transcription fallback to random', () => {
-  test('For any session where the last question has no transcription, determineQuestionType returns random', () => {
+  test('For any session where the last question has no transcription, determineQuestionType returns contextual', () => {
     fc.assert(
       fc.property(
         fc.array(answeredQuestionArb, { minLength: 0, maxLength: 8 }),
@@ -128,16 +129,16 @@ describe('Feature: hybrid-interview-questions, Property 3: no-transcription fall
             { questionText: lastQuestion.questionText, questionType: lastQuestion.questionType, transcription: undefined as string | undefined },
           ];
           const result = determineQuestionType(questions);
-          expect(result).toBe('random');
+          expect(result).toBe('contextual');
         }
       ),
       { numRuns: 100 }
     );
   });
 
-  test('For empty questions array, determineQuestionType returns random', () => {
+  test('For empty questions array, determineQuestionType returns contextual', () => {
     const result = determineQuestionType([]);
-    expect(result).toBe('random');
+    expect(result).toBe('contextual');
   });
 });
 
@@ -166,7 +167,7 @@ describe('Feature: hybrid-interview-questions, Property 4: random prompt contain
           const questions = previousQuestionTexts.map((text, i) => ({
             questionId: `q${i}`,
             questionText: text,
-            questionType: 'random' as const,
+            questionType: 'introduction' as const,
             ...(i < previousQuestionTexts.length - 1 ? { transcription: 'some answer' } : {}),
           }));
 
@@ -186,7 +187,7 @@ describe('Feature: hybrid-interview-questions, Property 4: random prompt contain
             if (command._type === 'InvokeModelCommand') {
               return Promise.resolve({
                 body: new TextEncoder().encode(
-                  JSON.stringify({ content: [{ text: 'A new question?' }] })
+                  JSON.stringify({ output: { message: { content: [{ text: 'A new question?' }] } } })
                 ),
               });
             }
@@ -198,12 +199,13 @@ describe('Feature: hybrid-interview-questions, Property 4: random prompt contain
             sessionId: 'session-1',
           });
 
-          expect(response.questionType).toBe('random');
+          expect(response.questionType).toBe('contextual');
 
           expect(InvokeModelCommand).toHaveBeenCalledTimes(1);
           const bedrockCall = InvokeModelCommand.mock.calls[0][0];
           const body = JSON.parse(bedrockCall.body);
-          const prompt: string = body.messages[0].content;
+          const rawContent = body.messages[0].content;
+          const prompt: string = Array.isArray(rawContent) ? rawContent.map((c: { text: string }) => c.text).join('') : rawContent;
 
           expect(prompt).toContain(seniority);
           expect(prompt).toContain(jobPosition);
@@ -229,9 +231,9 @@ describe('Feature: hybrid-interview-questions, Property 4: random prompt contain
 // **Validates: Requirements 3.1, 7.1**
 // ============================================================================
 describe('Feature: hybrid-interview-questions, Property 5: question type classification is always valid', () => {
-  test('For any questions array, determineQuestionType returns exactly contextual or random', () => {
+  test('For any questions array, determineQuestionType returns contextual', () => {
     const questionArb = fc.record({
-      questionType: fc.option(fc.constantFrom('contextual' as const, 'random' as const), { nil: undefined }),
+      questionType: fc.option(fc.constantFrom('contextual' as const, 'introduction' as const), { nil: undefined }),
       transcription: fc.option(printableStringArb, { nil: undefined }),
     });
 
@@ -240,7 +242,7 @@ describe('Feature: hybrid-interview-questions, Property 5: question type classif
         fc.array(questionArb, { minLength: 0, maxLength: 15 }),
         (questions) => {
           const result = determineQuestionType(questions);
-          expect(['contextual', 'random']).toContain(result);
+          expect(result).toBe('contextual');
           expect(typeof result).toBe('string');
           expect(result).not.toBeUndefined();
           expect(result).not.toBeNull();
@@ -256,16 +258,16 @@ describe('Feature: hybrid-interview-questions, Property 5: question type classif
 // **Validates: Requirements 3.2, 3.4**
 // ============================================================================
 describe('Feature: hybrid-interview-questions, Property 6: question type selection respects target ratio', () => {
-  test('When contextual ratio is below 0.5 and last question has transcription, returns contextual', () => {
+  test('determineQuestionType always returns contextual regardless of ratio', () => {
     const lowRatioSessionArb = fc.integer({ min: 2, max: 20 }).chain(totalCount => {
       const maxContextual = Math.ceil(totalCount * 0.5) - 1;
       return fc.integer({ min: 0, max: Math.max(0, maxContextual) }).map(contextualCount => {
-        const questions: Array<{ questionType: 'contextual' | 'random'; transcription: string }> = [];
+        const questions: Array<{ questionType: 'contextual' | 'introduction'; transcription: string }> = [];
         for (let i = 0; i < contextualCount; i++) {
           questions.push({ questionType: 'contextual', transcription: 'answer' });
         }
         for (let i = contextualCount; i < totalCount; i++) {
-          questions.push({ questionType: 'random', transcription: 'answer' });
+          questions.push({ questionType: 'introduction', transcription: 'answer' });
         }
         return questions;
       });
@@ -273,10 +275,6 @@ describe('Feature: hybrid-interview-questions, Property 6: question type selecti
 
     fc.assert(
       fc.property(lowRatioSessionArb, (questions) => {
-        const contextualCount = questions.filter(q => q.questionType === 'contextual').length;
-        const ratio = contextualCount / questions.length;
-        if (ratio >= 0.5) return;
-
         const result = determineQuestionType(questions);
         expect(result).toBe('contextual');
       }),
@@ -284,16 +282,16 @@ describe('Feature: hybrid-interview-questions, Property 6: question type selecti
     );
   });
 
-  test('When contextual ratio is above 0.6 and last question has transcription, returns random', () => {
+  test('determineQuestionType returns contextual even with high contextual ratio', () => {
     const highRatioSessionArb = fc.integer({ min: 2, max: 20 }).chain(totalCount => {
       const minContextual = Math.floor(totalCount * 0.6) + 1;
       return fc.integer({ min: Math.min(minContextual, totalCount), max: totalCount }).map(contextualCount => {
-        const questions: Array<{ questionType: 'contextual' | 'random'; transcription: string }> = [];
+        const questions: Array<{ questionType: 'contextual' | 'introduction'; transcription: string }> = [];
         for (let i = 0; i < contextualCount; i++) {
           questions.push({ questionType: 'contextual', transcription: 'answer' });
         }
         for (let i = contextualCount; i < totalCount; i++) {
-          questions.push({ questionType: 'random', transcription: 'answer' });
+          questions.push({ questionType: 'introduction', transcription: 'answer' });
         }
         return questions;
       });
@@ -301,12 +299,8 @@ describe('Feature: hybrid-interview-questions, Property 6: question type selecti
 
     fc.assert(
       fc.property(highRatioSessionArb, (questions) => {
-        const contextualCount = questions.filter(q => q.questionType === 'contextual').length;
-        const ratio = contextualCount / questions.length;
-        if (ratio <= 0.6) return;
-
         const result = determineQuestionType(questions);
-        expect(result).toBe('random');
+        expect(result).toBe('contextual');
       }),
       { numRuns: 100 }
     );
@@ -358,7 +352,7 @@ describe('Feature: hybrid-interview-questions, Property 7: question type stored 
             if (command._type === 'InvokeModelCommand') {
               return Promise.resolve({
                 body: new TextEncoder().encode(
-                  JSON.stringify({ content: [{ text: 'Generated question?' }] })
+                  JSON.stringify({ output: { message: { content: [{ text: 'Generated question?' }] } } })
                 ),
               });
             }
@@ -370,7 +364,7 @@ describe('Feature: hybrid-interview-questions, Property 7: question type stored 
             sessionId: 'session-1',
           });
 
-          expect(['contextual', 'random']).toContain(response.questionType);
+          expect(['contextual', 'introduction']).toContain(response.questionType);
 
           expect(UpdateCommand).toHaveBeenCalledTimes(1);
           const updateCall = UpdateCommand.mock.calls[0][0];
@@ -378,7 +372,7 @@ describe('Feature: hybrid-interview-questions, Property 7: question type stored 
           const newQuestion = updateCall.ExpressionAttributeValues[':newQuestion'];
           expect(Array.isArray(newQuestion)).toBe(true);
           expect(newQuestion).toHaveLength(1);
-          expect(['contextual', 'random']).toContain(newQuestion[0].questionType);
+          expect(['contextual', 'introduction']).toContain(newQuestion[0].questionType);
           expect(newQuestion[0].questionType).toBe(response.questionType);
         }
       ),
@@ -399,7 +393,7 @@ describe('Feature: hybrid-interview-questions, Property 7: question type stored 
             if (command._type === 'InvokeModelCommand') {
               return Promise.resolve({
                 body: new TextEncoder().encode(
-                  JSON.stringify({ content: [{ text: 'First question?' }] })
+                  JSON.stringify({ output: { message: { content: [{ text: 'First question?' }] } } })
                 ),
               });
             }
@@ -411,14 +405,14 @@ describe('Feature: hybrid-interview-questions, Property 7: question type stored 
             jobPosition,
           });
 
-          expect(response.questionType).toBe('random');
+          expect(response.questionType).toBe('introduction');
 
           expect(PutCommand).toHaveBeenCalledTimes(1);
           const putCall = PutCommand.mock.calls[0][0];
           const storedQuestions = putCall.Item.questions;
           expect(Array.isArray(storedQuestions)).toBe(true);
           expect(storedQuestions.length).toBeGreaterThanOrEqual(1);
-          expect(storedQuestions[0].questionType).toBe('random');
+          expect(storedQuestions[0].questionType).toBe('introduction');
         }
       ),
       { numRuns: 100 }
@@ -431,7 +425,7 @@ describe('Feature: hybrid-interview-questions, Property 7: question type stored 
 // **Validates: Requirements 4.2**
 // ============================================================================
 describe('Feature: hybrid-interview-questions, Property 8: backward compatibility with missing questionType', () => {
-  test('For any session with questions missing questionType, determineQuestionType returns a valid result', () => {
+  test('For any session with questions missing questionType, determineQuestionType returns contextual', () => {
     const oldFormatQuestionArb = fc.record({
       transcription: fc.option(printableStringArb, { nil: undefined }),
     });
@@ -441,14 +435,14 @@ describe('Feature: hybrid-interview-questions, Property 8: backward compatibilit
         fc.array(oldFormatQuestionArb, { minLength: 0, maxLength: 15 }),
         (questions) => {
           const result = determineQuestionType(questions);
-          expect(['contextual', 'random']).toContain(result);
+          expect(result).toBe('contextual');
         }
       ),
       { numRuns: 100 }
     );
   });
 
-  test('Questions without questionType are treated as random for ratio calculation', () => {
+  test('Questions without questionType still result in contextual', () => {
     fc.assert(
       fc.property(
         fc.integer({ min: 1, max: 10 }),
@@ -458,7 +452,6 @@ describe('Feature: hybrid-interview-questions, Property 8: backward compatibilit
             questions.push({ transcription: 'some answer' });
           }
           const result = determineQuestionType(questions);
-          // No questionType => contextualCount = 0, ratio = 0 < 0.5 => contextual
           expect(result).toBe('contextual');
         }
       ),
@@ -466,9 +459,9 @@ describe('Feature: hybrid-interview-questions, Property 8: backward compatibilit
     );
   });
 
-  test('Mixed sessions with some questions having questionType and some not still produce valid results', () => {
+  test('Mixed sessions with some questions having questionType and some not still produce contextual', () => {
     const mixedQuestionArb = fc.record({
-      questionType: fc.option(fc.constantFrom('contextual' as const, 'random' as const), { nil: undefined }),
+      questionType: fc.option(fc.constantFrom('contextual' as const, 'introduction' as const), { nil: undefined }),
       transcription: fc.option(printableStringArb, { nil: undefined }),
     });
 
@@ -477,7 +470,7 @@ describe('Feature: hybrid-interview-questions, Property 8: backward compatibilit
         fc.array(mixedQuestionArb, { minLength: 1, maxLength: 15 }),
         (questions) => {
           const result = determineQuestionType(questions);
-          expect(['contextual', 'random']).toContain(result);
+          expect(result).toBe('contextual');
         }
       ),
       { numRuns: 100 }

@@ -83,7 +83,11 @@ vi.mock('aws-amplify/auth', () => ({
 
 /** Wait for the checking phase to complete and navigate to the position selector */
 async function waitForSelector() {
-  // After checking, the overview page appears first
+  // After checking, the mode-select phase appears first (JD targeting flow)
+  await screen.findByText('Lanjutkan')
+  // Click "Lanjutkan" to select Quick mode (pre-selected by default)
+  fireEvent.click(screen.getByText('Lanjutkan'))
+  // Now the overview page appears with "Start Practice"
   await screen.findByText('Start Practice')
   // Click "Start Practice" to show the JobPositionSelector
   fireEvent.click(screen.getByText('Start Practice'))
@@ -150,6 +154,9 @@ describe('SpeakingModule', () => {
 
   it('navigates to dashboard when back button is clicked', async () => {
     renderSpeakingModule()
+    // Wait for mode-select phase, then proceed to overview
+    await screen.findByText('Lanjutkan')
+    fireEvent.click(screen.getByText('Lanjutkan'))
     // Wait for the overview page to load
     await screen.findByText('Speaking Performance')
     // Click the "Overview" nav link in the header which navigates to /dashboard

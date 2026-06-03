@@ -18,6 +18,10 @@ export class StorageStack extends cdk.Stack {
       sortKey: { name: 'sessionId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
+      // TTL attribute used for ephemeral items like JD rate-limit records
+      // (sessions write `ttl` as epoch seconds ~48h from now). Default SSE
+      // (AWS-owned key) is retained for at-rest encryption.
+      timeToLiveAttribute: 'ttl',
     });
 
     sessionsTable.addGlobalSecondaryIndex({

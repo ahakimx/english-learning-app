@@ -62,7 +62,7 @@ describe('Feature: interview-position-enhancement, Property 2: Any position trig
           fireEvent.click(positionButton);
 
           // Seniority step heading should be visible
-          expect(screen.getByText('Pilih Tingkat Pengalaman')).toBeDefined();
+          expect(screen.getByText('Tentukan Level Pengalaman')).toBeDefined();
 
           // Position step heading should no longer be visible
           expect(screen.queryByText('Pilih Posisi Pekerjaan')).toBeNull();

@@ -12,6 +12,7 @@ jest.mock('@aws-sdk/lib-dynamodb', () => ({
   PutCommand: jest.fn((params: unknown) => ({ _type: 'PutCommand', params })),
   GetCommand: jest.fn((params: unknown) => ({ _type: 'GetCommand', params })),
   UpdateCommand: jest.fn((params: unknown) => ({ _type: 'UpdateCommand', params })),
+  QueryCommand: jest.fn((params: unknown) => ({ _type: 'QueryCommand', params })),
 }));
 
 jest.mock('@aws-sdk/client-bedrock-runtime', () => ({
@@ -27,22 +28,22 @@ describe('Hybrid Question Type - Unit Tests', () => {
     process.env.SESSIONS_TABLE_NAME = 'test-sessions-table';
   });
 
-  // --- 10.1: determineQuestionType returns 'random' for empty array ---
+  // --- 10.1: determineQuestionType returns 'contextual' for empty array ---
   describe('determineQuestionType', () => {
-    test('returns random for empty questions array', () => {
-      expect(determineQuestionType([])).toBe('random');
+    test('returns contextual for empty questions array', () => {
+      expect(determineQuestionType([])).toBe('contextual');
     });
   });
 
-  // --- 10.2: handleStartSession stores questionType: 'random' ---
-  describe('handleStartSession stores questionType: random', () => {
-    test('stores questionType random in DynamoDB and returns it in response', async () => {
+  // --- 10.2: handleStartSession stores questionType: 'introduction' ---
+  describe('handleStartSession stores questionType: introduction', () => {
+    test('stores questionType introduction in DynamoDB and returns it in response', async () => {
       mockSend.mockImplementation((command: { _type?: string }) => {
         if (command._type === 'InvokeModelCommand') {
           return Promise.resolve({
             body: new TextEncoder().encode(
               JSON.stringify({
-                content: [{ text: 'Tell me about your experience.' }],
+                output: { message: { content: [{ text: 'Tell me about your experience.' }] } },
               })
             ),
           });
@@ -55,8 +56,8 @@ describe('Hybrid Question Type - Unit Tests', () => {
         jobPosition: 'Software Engineer',
       });
 
-      // Verify response includes questionType: 'random'
-      expect(result.questionType).toBe('random');
+      // Verify response includes questionType: 'introduction'
+      expect(result.questionType).toBe('introduction');
       expect(result.type).toBe('question');
 
       // Verify PutCommand was called with questionType in the first question
@@ -64,7 +65,7 @@ describe('Hybrid Question Type - Unit Tests', () => {
       expect(PutCommand).toHaveBeenCalledTimes(1);
       const putParams = PutCommand.mock.calls[0][0];
       expect(putParams.Item.questions).toHaveLength(1);
-      expect(putParams.Item.questions[0].questionType).toBe('random');
+      expect(putParams.Item.questions[0].questionType).toBe('introduction');
     });
   });
 
@@ -84,7 +85,7 @@ describe('Hybrid Question Type - Unit Tests', () => {
                 {
                   questionId: 'q1',
                   questionText: 'Tell me about yourself',
-                  questionType: 'random',
+                  questionType: 'introduction',
                   transcription: 'I have 5 years of experience in software development.',
                 },
               ],
@@ -95,7 +96,7 @@ describe('Hybrid Question Type - Unit Tests', () => {
           return Promise.resolve({
             body: new TextEncoder().encode(
               JSON.stringify({
-                content: [{ text: 'Can you elaborate on your experience?' }],
+                output: { message: { content: [{ text: 'Can you elaborate on your experience?' }] } },
               })
             ),
           });
@@ -110,7 +111,7 @@ describe('Hybrid Question Type - Unit Tests', () => {
 
       // Verify response has questionType
       expect(result.questionType).toBeDefined();
-      expect(['contextual', 'random']).toContain(result.questionType);
+      expect(result.questionType).toBe('contextual');
       expect(result.type).toBe('question');
 
       // Verify UpdateCommand was called with questionType in the new question
@@ -119,7 +120,7 @@ describe('Hybrid Question Type - Unit Tests', () => {
       const updateParams = UpdateCommand.mock.calls[0][0];
       const newQuestion = updateParams.ExpressionAttributeValues[':newQuestion'];
       expect(newQuestion).toHaveLength(1);
-      expect(['contextual', 'random']).toContain(newQuestion[0].questionType);
+      expect(newQuestion[0].questionType).toBe('contextual');
 
       // Verify response questionType matches what was stored
       expect(result.questionType).toBe(newQuestion[0].questionType);
@@ -199,7 +200,7 @@ describe('Hybrid Question Type - Unit Tests', () => {
           return Promise.resolve({
             body: new TextEncoder().encode(
               JSON.stringify({
-                content: [{ text: 'How do you handle missing data in your analyses?' }],
+                output: { message: { content: [{ text: 'How do you handle missing data in your analyses?' }] } },
               })
             ),
           });
@@ -219,7 +220,7 @@ describe('Hybrid Question Type - Unit Tests', () => {
 
       // Verify response has questionType field
       expect(result.questionType).toBeDefined();
-      expect(['contextual', 'random']).toContain(result.questionType);
+      expect(result.questionType).toBe('contextual');
     });
   });
 });

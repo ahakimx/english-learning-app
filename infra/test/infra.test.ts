@@ -150,8 +150,8 @@ describe('ApiStack', () => {
     template.resourceCountIs('AWS::ApiGateway::RestApi', 1);
   });
 
-  test('has 4 Lambda functions', () => {
-    template.resourceCountIs('AWS::Lambda::Function', 4);
+  test('has 5 Lambda functions', () => {
+    template.resourceCountIs('AWS::Lambda::Function', 5);
   });
 
   test('Lambda functions have correct runtime (Node.js 20)', () => {

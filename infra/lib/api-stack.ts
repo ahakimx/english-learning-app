@@ -1,6 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -57,6 +59,10 @@ export class ApiStack extends cdk.Stack {
         SESSIONS_TABLE_NAME: storage.sessionsTableName,
         PROGRESS_TABLE_NAME: storage.progressTableName,
         BEDROCK_TEXT_MODEL_ID: process.env.BEDROCK_TEXT_MODEL_ID ?? 'amazon.nova-pro-v1:0',
+        // JD targeting: per-user daily rate limit for analyze_job_description (stage-configurable).
+        JD_RATE_LIMIT: process.env.JD_RATE_LIMIT ?? '5',
+        // JD targeting: retention window (days) after which jdContext is removed from Session_Records.
+        JD_RETENTION_DAYS: process.env.JD_RETENTION_DAYS ?? '30',
       },
     });
 
@@ -78,6 +84,36 @@ export class ApiStack extends cdk.Stack {
         `arn:aws:dynamodb:${this.region}:${this.account}:table/${storage.sessionsTableName}/index/*`,
       ],
     }));
+
+    // --- Lambda: JD retention cleanup (scheduled) ---
+    // Runs daily to scan Session_Records for targeted-mode sessions whose jdContext
+    // has exceeded JD_RETENTION_DAYS and removes the jdContext attribute.
+    const jdRetentionCleanupHandler = new NodejsFunction(this, 'JdRetentionCleanupHandler', {
+      functionName: 'EnglishLearningApp-JdRetentionCleanup',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: path.join(__dirname, '..', 'lambda', 'chat', 'jdRetentionCleanup', 'index.ts'),
+      handler: 'handler',
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 256,
+      environment: {
+        SESSIONS_TABLE_NAME: storage.sessionsTableName,
+        JD_RETENTION_DAYS: process.env.JD_RETENTION_DAYS ?? '30',
+      },
+    });
+
+    jdRetentionCleanupHandler.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['dynamodb:Scan', 'dynamodb:UpdateItem'],
+      resources: [
+        `arn:aws:dynamodb:${this.region}:${this.account}:table/${storage.sessionsTableName}`,
+      ],
+    }));
+
+    new events.Rule(this, 'JdRetentionCleanupSchedule', {
+      ruleName: 'EnglishLearningApp-JdRetentionCleanupSchedule',
+      schedule: events.Schedule.rate(cdk.Duration.days(1)),
+      targets: [new targets.LambdaFunction(jdRetentionCleanupHandler)],
+    });
 
     // --- Lambda: /transcribe ---
     const transcribeHandler = new NodejsFunction(this, 'TranscribeHandler', {

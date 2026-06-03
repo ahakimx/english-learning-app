@@ -114,6 +114,11 @@ describe('Feature: nova-sonic-speaking-migration, Property 5: Start session requ
         async (position, seniority, category) => {
           render(<SpeakingModule />)
 
+          // Wait for mode-select phase to appear (JD targeting flow)
+          await screen.findByText('Lanjutkan')
+          // Click "Lanjutkan" to select Quick mode (pre-selected by default)
+          fireEvent.click(screen.getByText('Lanjutkan'))
+
           // Wait for checking phase to complete (overview page appears)
           await screen.findByText('Start Practice')
 

@@ -36,6 +36,20 @@ export type QuestionCategory = 'general' | 'technical';
 
 export type QuestionType = 'introduction' | 'contextual';
 
+export type SessionMode = 'quick' | 'targeted';
+
+export interface JobDescriptionContext {
+  company: string;
+  role: string;
+  technologies: string[];
+  responsibilities: string[];
+  requirements: string[];
+  softSkills: string[];
+  suggestedSeniority: SeniorityLevel;
+  suggestedCategory: QuestionCategory;
+  userNotes: string;
+}
+
 export interface ChatRequest {
   sessionId?: string;
   action:
@@ -48,7 +62,8 @@ export interface ChatRequest {
     | 'grammar_quiz'
     | 'grammar_explain'
     | 'writing_prompt'
-    | 'writing_review';
+    | 'writing_review'
+    | 'analyze_job_description';
   jobPosition?: string;
   transcription?: string;
   grammarTopic?: string;
@@ -57,6 +72,9 @@ export interface ChatRequest {
   writingContent?: string;
   seniorityLevel?: SeniorityLevel;
   questionCategory?: QuestionCategory;
+  mode?: SessionMode;
+  jdContext?: JobDescriptionContext;
+  jdRawText?: string;
 }
 
 export interface ChatResponse {
@@ -71,7 +89,8 @@ export interface ChatResponse {
     | 'writing_review'
     | 'no_active_session'
     | 'session_resumed'
-    | 'session_abandoned';
+    | 'session_abandoned'
+    | 'jd_analysis';
   content: string;
   sessionData?: SessionData;
   feedbackReport?: FeedbackReport;
@@ -79,6 +98,8 @@ export interface ChatResponse {
   quizData?: QuizData;
   writingReview?: WritingReviewData;
   questionType?: QuestionType;
+  jdContext?: JobDescriptionContext;
+  jdContextExpired?: boolean;
 }
 
 export interface FeedbackReport {
@@ -174,6 +195,8 @@ export interface SessionData {
   questions: SessionQuestion[];
   createdAt: string;
   updatedAt: string;
+  mode?: SessionMode;
+  jdContext?: JobDescriptionContext;
 }
 
 export interface SessionQuestion {
@@ -285,4 +308,8 @@ export interface SessionRecord {
   connectionId?: string;     // WebSocket connection ID
   conversationHistory?: ConversationTurn[]; // untuk reconnect/resume
   totalDurationSeconds?: number; // durasi total sesi
+
+  // JD Targeting fields — absent ≡ 'quick' mode for backward compatibility
+  mode?: SessionMode;
+  jdContext?: JobDescriptionContext;
 }
