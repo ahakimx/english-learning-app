@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import * as fc from 'fast-check'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import type { JobDescriptionContext, SessionData } from '../../types'
+import type { JobDescriptionContext, SessionConfig, SessionData } from '../../types'
 
 /**
  * Feature: jd-targeting
@@ -48,7 +48,7 @@ vi.mock('../../hooks/useAuth', () => ({
 }))
 
 const mockConnect = vi.fn(() => Promise.resolve())
-const mockStartSession = vi.fn(() => Promise.resolve())
+const mockStartSession = vi.fn((_config: SessionConfig) => Promise.resolve())
 
 vi.mock('../../hooks/useNovaSonic', () => ({
   default: () => ({
