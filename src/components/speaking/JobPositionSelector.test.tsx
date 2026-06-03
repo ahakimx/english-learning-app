@@ -16,24 +16,24 @@ describe('JobPositionSelector', () => {
   })
 
   // Requirement 1.1, 1.3: DevOps Engineer with correct icon
-  it('renders DevOps Engineer button with 🔧 icon', () => {
+  it('renders DevOps Engineer button with build icon', () => {
     const onSelect = vi.fn()
     render(<JobPositionSelector onSelect={onSelect} />)
 
     const button = screen.getByLabelText('Pilih posisi DevOps Engineer')
     expect(button).toBeInTheDocument()
-    expect(button.textContent).toContain('🔧')
+    expect(button.textContent).toContain('build')
     expect(button.textContent).toContain('DevOps Engineer')
   })
 
   // Requirement 1.1, 1.3: Cloud Engineer with correct icon
-  it('renders Cloud Engineer button with ☁️ icon', () => {
+  it('renders Cloud Engineer button with cloud icon', () => {
     const onSelect = vi.fn()
     render(<JobPositionSelector onSelect={onSelect} />)
 
     const button = screen.getByLabelText('Pilih posisi Cloud Engineer')
     expect(button).toBeInTheDocument()
-    expect(button.textContent).toContain('☁️')
+    expect(button.textContent).toContain('cloud')
     expect(button.textContent).toContain('Cloud Engineer')
   })
 
@@ -44,14 +44,14 @@ describe('JobPositionSelector', () => {
 
     // Select a position to go to seniority step
     fireEvent.click(screen.getByLabelText('Pilih posisi Software Engineer'))
-    expect(screen.getByText('Pilih Tingkat Pengalaman')).toBeInTheDocument()
+    expect(screen.getByText('Tentukan Level Pengalaman')).toBeInTheDocument()
 
     // Click back button
     fireEvent.click(screen.getByLabelText('Kembali ke pilihan posisi'))
 
     // Should be back at position step
     expect(screen.getByText('Pilih Posisi Pekerjaan')).toBeInTheDocument()
-    expect(screen.queryByText('Pilih Tingkat Pengalaman')).not.toBeInTheDocument()
+    expect(screen.queryByText('Tentukan Level Pengalaman')).not.toBeInTheDocument()
   })
 
   // Back button from category step returns to seniority step
@@ -68,7 +68,7 @@ describe('JobPositionSelector', () => {
     fireEvent.click(screen.getByLabelText('Kembali ke pilihan tingkat pengalaman'))
 
     // Should be back at seniority step
-    expect(screen.getByText('Pilih Tingkat Pengalaman')).toBeInTheDocument()
+    expect(screen.getByText('Tentukan Level Pengalaman')).toBeInTheDocument()
     expect(screen.queryByText('Pilih Kategori Pertanyaan')).not.toBeInTheDocument()
   })
 
@@ -81,7 +81,7 @@ describe('JobPositionSelector', () => {
     fireEvent.click(screen.getByLabelText('Pilih posisi Product Manager'))
     fireEvent.click(screen.getByLabelText('Pilih tingkat Menengah'))
 
-    expect(screen.getByText('Pertanyaan perilaku, soft skills, dan motivasi')).toBeInTheDocument()
+    expect(screen.getByText(/soft skills.*leadership scenarios.*behavioral questions/i)).toBeInTheDocument()
   })
 
   // Requirement 3.3: Technical category shows role-specific description
@@ -93,7 +93,7 @@ describe('JobPositionSelector', () => {
     fireEvent.click(screen.getByLabelText('Pilih posisi UI/UX Designer'))
     fireEvent.click(screen.getByLabelText('Pilih tingkat Lead'))
 
-    expect(screen.getByText('Pertanyaan teknis sesuai posisi dan tingkat pengalaman')).toBeInTheDocument()
+    expect(screen.getByText(/role-specific knowledge.*problem-solving.*technical proficiency/i)).toBeInTheDocument()
   })
 
   // Full flow: position → seniority → category calls onSelect with correct arguments

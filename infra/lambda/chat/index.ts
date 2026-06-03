@@ -1,8 +1,11 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { ChatRequest, ChatResponse, FeedbackReport, SummaryReport, QuizData, WritingReviewData, SeniorityLevel, QuestionCategory, QuestionType, SessionData } from '../../lib/types';
+import { ChatRequest, ChatResponse, FeedbackReport, SummaryReport, QuizData, WritingReviewData, SeniorityLevel, QuestionCategory, QuestionType, SessionData, SessionMode, JobDescriptionContext } from '../../lib/types';
 import { invokeTextModelWithTimeout } from '../shared/bedrockInvoke';
+import { buildJdAnalysisPrompt, parseJdAnalysisResponse, normalizeJdContext, JdAnalysisError } from './jdAnalysis';
+import { stripJdFromError, logJdEvent } from './jdPrivacy';
+import { incrementJdRateLimit, decrementJdRateLimit } from './jdRateLimit';
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
@@ -25,6 +28,7 @@ const VALID_ACTIONS: ChatRequest['action'][] = [
   'grammar_explain',
   'writing_prompt',
   'writing_review',
+  'analyze_job_description',
 ];
 
 const REQUIRED_FIELDS: Record<ChatRequest['action'], (keyof ChatRequest)[]> = {
@@ -38,6 +42,7 @@ const REQUIRED_FIELDS: Record<ChatRequest['action'], (keyof ChatRequest)[]> = {
   grammar_explain: ['sessionId', 'selectedAnswer'],
   writing_prompt: ['writingType'],
   writing_review: ['sessionId', 'writingContent'],
+  analyze_job_description: ['jdRawText'],
 };
 
 const BEDROCK_MODEL_ID = process.env.BEDROCK_TEXT_MODEL_ID ?? 'amazon.nova-pro-v1:0';
@@ -46,6 +51,23 @@ const SESSION_EXPIRY_HOURS = 24;
 
 const VALID_SENIORITY_LEVELS: SeniorityLevel[] = ['junior', 'mid', 'senior', 'lead'];
 const VALID_QUESTION_CATEGORIES: QuestionCategory[] = ['general', 'technical'];
+
+// JD targeting constants
+const JD_MIN_LENGTH = 100;
+const JD_MAX_LENGTH = 10000;
+const JD_RATE_LIMIT = parseInt(process.env.JD_RATE_LIMIT ?? '5', 10);
+const JD_RETENTION_DAYS = parseInt(process.env.JD_RETENTION_DAYS ?? '30', 10);
+const VALID_MODES: SessionMode[] = ['quick', 'targeted'];
+
+/**
+ * Determines the effective session mode from a session record or request.
+ * Returns `'targeted'` iff `record.mode === 'targeted'`; every other value
+ * (including `undefined`, `null`, `'quick'`, or any invalid string) maps to `'quick'`.
+ * This preserves backward compatibility with session records that predate the JD feature.
+ */
+function determineSessionMode(record: { mode?: string }): SessionMode {
+  return record.mode === 'targeted' ? 'targeted' : 'quick';
+}
 
 const INTRODUCTION_QUESTIONS: Record<SeniorityLevel, string> = {
   junior: 'Please introduce yourself and tell me about your educational background and any relevant experience or projects that prepared you for this role.',
@@ -64,6 +86,17 @@ class AuthorizationError extends Error {
   }
 }
 
+/**
+ * Error thrown when a user exceeds the daily JD analysis rate limit.
+ * Mapped by the handler to HTTP 429 with error code `JD_RATE_LIMIT_EXCEEDED`.
+ */
+class RateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RateLimitError';
+  }
+}
+
 // --- Helper functions ---
 
 function successResponse(statusCode: number, body: ChatResponse): APIGatewayProxyResult {
@@ -78,42 +111,100 @@ function extractUserId(event: APIGatewayProxyEvent): string | null {
   return event.requestContext.authorizer?.claims?.sub ?? null;
 }
 
-function validateRequest(body: Record<string, unknown>): { valid: false; message: string } | { valid: true; request: ChatRequest } {
+function validateRequest(body: Record<string, unknown>): { valid: false; code: string; message: string } | { valid: true; request: ChatRequest } {
   const { action } = body;
 
   if (!action || typeof action !== 'string') {
-    return { valid: false, message: 'Missing required field: action' };
+    return { valid: false, code: 'Bad Request', message: 'Missing required field: action' };
   }
 
   if (!VALID_ACTIONS.includes(action as ChatRequest['action'])) {
-    return { valid: false, message: `Invalid action: ${action}. Valid actions: ${VALID_ACTIONS.join(', ')}` };
+    return { valid: false, code: 'Bad Request', message: `Invalid action: ${action}. Valid actions: ${VALID_ACTIONS.join(', ')}` };
   }
 
   const typedAction = action as ChatRequest['action'];
+
+  // --- JD-specific validation for analyze_job_description ---
+  // Done before the generic REQUIRED_FIELDS check so we can return precise
+  // error codes (INVALID_MODE / JD_TOO_SHORT / JD_TOO_LONG) instead of the
+  // generic "Missing required field" message.
+  if (typedAction === 'analyze_job_description') {
+    // mode MUST be explicit and one of VALID_MODES (Requirement 10.5)
+    const mode = body.mode;
+    if (typeof mode !== 'string' || !VALID_MODES.includes(mode as SessionMode)) {
+      return {
+        valid: false,
+        code: 'INVALID_MODE',
+        message: `Invalid or missing mode for analyze_job_description. Must be one of: ${VALID_MODES.join(', ')}`,
+      };
+    }
+
+    // jdRawText length validation (Requirements 2.3, 2.4, 3.3, 3.4)
+    const jdRawText = body.jdRawText;
+    if (typeof jdRawText !== 'string' || jdRawText.length < JD_MIN_LENGTH) {
+      return {
+        valid: false,
+        code: 'JD_TOO_SHORT',
+        message: `Job description must be at least ${JD_MIN_LENGTH} characters`,
+      };
+    }
+    if (jdRawText.length > JD_MAX_LENGTH) {
+      return {
+        valid: false,
+        code: 'JD_TOO_LONG',
+        message: `Job description must not exceed ${JD_MAX_LENGTH} characters`,
+      };
+    }
+
+    // analyze_job_description passed JD-specific validation — skip generic
+    // REQUIRED_FIELDS check (jdRawText is already verified above).
+    return { valid: true, request: body as unknown as ChatRequest };
+  }
+
   const requiredFields = REQUIRED_FIELDS[typedAction];
 
   for (const field of requiredFields) {
     const value = body[field];
     if (value === undefined || value === null || value === '') {
-      return { valid: false, message: `Missing required field for action '${typedAction}': ${field}` };
+      return { valid: false, code: 'Bad Request', message: `Missing required field for action '${typedAction}': ${field}` };
     }
   }
 
   if (typedAction === 'writing_prompt') {
     const writingType = body.writingType;
     if (writingType !== 'essay' && writingType !== 'email') {
-      return { valid: false, message: "Invalid writingType. Must be 'essay' or 'email'" };
+      return { valid: false, code: 'Bad Request', message: "Invalid writingType. Must be 'essay' or 'email'" };
     }
   }
 
   if (typedAction === 'start_session') {
     const seniorityLevel = body.seniorityLevel;
     if (seniorityLevel !== undefined && !VALID_SENIORITY_LEVELS.includes(seniorityLevel as SeniorityLevel)) {
-      return { valid: false, message: `Invalid seniorityLevel: '${seniorityLevel}'. Must be one of: ${VALID_SENIORITY_LEVELS.join(', ')}` };
+      return { valid: false, code: 'Bad Request', message: `Invalid seniorityLevel: '${seniorityLevel}'. Must be one of: ${VALID_SENIORITY_LEVELS.join(', ')}` };
     }
     const questionCategory = body.questionCategory;
     if (questionCategory !== undefined && !VALID_QUESTION_CATEGORIES.includes(questionCategory as QuestionCategory)) {
-      return { valid: false, message: `Invalid questionCategory: '${questionCategory}'. Must be one of: ${VALID_QUESTION_CATEGORIES.join(', ')}` };
+      return { valid: false, code: 'Bad Request', message: `Invalid questionCategory: '${questionCategory}'. Must be one of: ${VALID_QUESTION_CATEGORIES.join(', ')}` };
+    }
+
+    // Targeted-mode session start requires a valid jdContext with a non-empty role.
+    // Any non-'targeted' mode value (including missing, invalid, or 'quick') is
+    // treated as Quick Mode and does not require jdContext (Requirements 6.5, 10.2, 10.3, 10.4).
+    if (body.mode === 'targeted') {
+      const jdContext = body.jdContext;
+      const isValidJdContext =
+        jdContext !== null &&
+        typeof jdContext === 'object' &&
+        typeof (jdContext as { role?: unknown }).role === 'string' &&
+        ((jdContext as { role: string }).role).trim() !== '';
+
+      if (!isValidJdContext) {
+        return {
+          valid: false,
+          code: 'INVALID_TARGETED_REQUEST',
+          message: 'Targeted session requires a jdContext with a non-empty role',
+        };
+      }
     }
   }
 
@@ -232,28 +323,54 @@ async function handleStartSession(userId: string, request: ChatRequest): Promise
 
   const sessionId = crypto.randomUUID();
   const now = new Date().toISOString();
-  const seniorityLevel: SeniorityLevel = request.seniorityLevel ?? 'mid';
-  const questionCategory: QuestionCategory = request.questionCategory ?? 'general';
+
+  // Determine effective mode: only the literal 'targeted' activates targeted mode;
+  // missing, 'quick', or any invalid value is treated as Quick (Requirements 6.7, 10.2, 10.3, 10.4).
+  const effectiveMode = determineSessionMode(request);
+  const isTargeted = effectiveMode === 'targeted';
+
+  // In targeted mode, validateRequest has already ensured request.jdContext exists
+  // with a non-empty role. Fall back seniorityLevel/questionCategory to suggested values
+  // from jdContext when not explicitly supplied (Requirement 6.8).
+  const seniorityLevel: SeniorityLevel = request.seniorityLevel
+    ?? (isTargeted ? request.jdContext!.suggestedSeniority : undefined)
+    ?? 'mid';
+  const questionCategory: QuestionCategory = request.questionCategory
+    ?? (isTargeted ? request.jdContext!.suggestedCategory : undefined)
+    ?? 'general';
 
   // Hardcoded self-introduction question — no Bedrock call
   const questionText = INTRODUCTION_QUESTIONS[seniorityLevel];
   const questionId = crypto.randomUUID();
 
+  // Base record — shared between quick and targeted modes.
+  // Per Requirement 10.7, records without a mode field must stay that way;
+  // we therefore only add `mode` and `jdContext` keys when the session is targeted.
+  const item: Record<string, unknown> = {
+    userId,
+    sessionId,
+    type: 'speaking',
+    status: 'active',
+    jobPosition: request.jobPosition,
+    seniorityLevel,
+    questionCategory,
+    questions: [{ questionId, questionText, questionType: 'introduction' as const }],
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  if (isTargeted) {
+    // Persist mode and jdContext verbatim so array ordering in technologies,
+    // responsibilities, requirements, and softSkills is preserved on the write
+    // path (Requirements 6.6, 14.1, 14.2, 14.3).
+    item.mode = 'targeted';
+    item.jdContext = request.jdContext!;
+  }
+
   await docClient.send(
     new PutCommand({
       TableName: process.env.SESSIONS_TABLE_NAME,
-      Item: {
-        userId,
-        sessionId,
-        type: 'speaking',
-        status: 'active',
-        jobPosition: request.jobPosition,
-        seniorityLevel,
-        questionCategory,
-        questions: [{ questionId, questionText, questionType: 'introduction' as const }],
-        createdAt: now,
-        updatedAt: now,
-      },
+      Item: item,
     })
   );
 
@@ -322,7 +439,8 @@ async function handleResumeSession(userId: string, _request: ChatRequest): Promi
     return { type: 'no_active_session', content: '', sessionId: '' };
   }
 
-  // Build SessionData from the session record
+  // Build SessionData from the session record (pre-feature shape — kept
+  // byte-identical on this path so Quick-mode resume responses are unchanged).
   const sessionData: SessionData = {
     sessionId: session.sessionId as string,
     jobPosition: session.jobPosition as string,
@@ -340,12 +458,43 @@ async function handleResumeSession(userId: string, _request: ChatRequest): Promi
     updatedAt: session.updatedAt as string,
   };
 
-  return {
+  const response: ChatResponse = {
     type: 'session_resumed',
     sessionData,
     sessionId: session.sessionId as string,
     content: '',
   };
+
+  // --- JD Targeting: mode-aware resume response (Requirements 9.1, 9.2, 9.5, 9.6) ---
+  // Quick-mode (or mode-absent) sessions leave `response` and `sessionData`
+  // byte-identical to the pre-feature shape — no `mode`, `jdContext`, or
+  // `jdContextExpired` keys are added. Only when the effective mode is
+  // 'targeted' do we surface `sessionData.mode` and either attach
+  // `sessionData.jdContext` (fresh) or raise `response.jdContextExpired`
+  // (retention lapsed or scheduled cleanup already removed the field).
+  const effectiveMode = determineSessionMode(session as { mode?: string });
+  if (effectiveMode === 'targeted') {
+    sessionData.mode = 'targeted';
+
+    // Lazy retention check: if updatedAt is strictly older than
+    // JD_RETENTION_DAYS days, treat the JD context as expired even if the
+    // scheduled cleanup Lambda has not yet removed the attribute.
+    const retentionMs = JD_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const retentionExpired = now - updatedAt > retentionMs;
+    const storedJdContext = session.jdContext as JobDescriptionContext | undefined;
+
+    if (!retentionExpired && storedJdContext) {
+      // Fresh targeted session — include jdContext verbatim (Requirement 9.1).
+      sessionData.jdContext = storedJdContext;
+    } else {
+      // Either the lazy retention check tripped, or the scheduled cleanup
+      // Lambda already removed `jdContext`. In both cases signal to the
+      // client that the JD context is no longer available (Requirement 9.6).
+      response.jdContextExpired = true;
+    }
+  }
+
+  return response;
 }
 
 
@@ -435,8 +584,33 @@ Candidate's Answer: "${transcription}"
 
 Analyze this answer and return the JSON assessment.`;
 
+  // --- JD Targeting: mode-aware prompt extension (Requirements 8.1, 8.2, 8.3, 8.5, 9.6) ---
+  // Only when the session's effective mode is 'targeted', its jdContext is still
+  // present (not retention-expired), and at least one of technologies / responsibilities /
+  // requirements is non-empty do we append a JD context block to the feedback prompt.
+  // Otherwise the prompt passed to Bedrock is byte-identical to the Quick-mode prompt.
+  let effectiveSystemPrompt = systemPrompt;
+  const effectiveMode = determineSessionMode(session as { mode?: string });
+  const jdContext = session.jdContext as JobDescriptionContext | undefined;
+  if (effectiveMode === 'targeted' && jdContext) {
+    const technologies = Array.isArray(jdContext.technologies) ? jdContext.technologies : [];
+    const responsibilities = Array.isArray(jdContext.responsibilities) ? jdContext.responsibilities : [];
+    const requirements = Array.isArray(jdContext.requirements) ? jdContext.requirements : [];
+    const hasAnyListContent =
+      technologies.length > 0 || responsibilities.length > 0 || requirements.length > 0;
+
+    if (hasAnyListContent) {
+      effectiveSystemPrompt +=
+        `\n\nThis interview targets a specific role. Reference these elements when assessing relevance:\n` +
+        `- Technologies: ${technologies.join(', ')}\n` +
+        `- Responsibilities: ${responsibilities.join(', ')}\n` +
+        `- Requirements: ${requirements.join(', ')}\n` +
+        'Include at least one specific suggestion in the `suggestions` array that references an item from these lists.';
+    }
+  }
+
   const responseText = await invokeTextModelWithTimeout(
-    { modelId: BEDROCK_MODEL_ID, systemPrompt, userPrompt, maxTokens: 2000 },
+    { modelId: BEDROCK_MODEL_ID, systemPrompt: effectiveSystemPrompt, userPrompt, maxTokens: 2000 },
     15_000,
   );
 
@@ -618,8 +792,33 @@ ${JSON.stringify(feedbackSummaries, null, 2)}
 
 Generate the summary report JSON.`;
 
+  // --- JD Targeting: mode-aware summary prompt extension (Requirements 8.4, 8.5, 9.6) ---
+  // Only when the session's effective mode is 'targeted', its jdContext is still present
+  // (i.e., not retention-expired), and at least one of role / technologies / requirements
+  // is non-empty do we append a JD instruction block. Otherwise the prompt passed to
+  // Bedrock is byte-identical to the Quick-mode (pre-feature) prompt (Requirement 8.5).
+  let effectiveSystemPrompt = systemPrompt;
+  const effectiveMode = determineSessionMode(session as { mode?: string });
+  const jdContext = session.jdContext as JobDescriptionContext | undefined;
+  if (effectiveMode === 'targeted' && jdContext) {
+    const role = typeof jdContext.role === 'string' ? jdContext.role : '';
+    const technologies = Array.isArray(jdContext.technologies) ? jdContext.technologies : [];
+    const requirements = Array.isArray(jdContext.requirements) ? jdContext.requirements : [];
+    const hasAnyField =
+      role.trim() !== '' || technologies.length > 0 || requirements.length > 0;
+
+    if (hasAnyField) {
+      effectiveSystemPrompt +=
+        `\n\nThis session is targeted at a specific role. In the \`topImprovementAreas\` and \`recommendations\` arrays, reference at least one of:\n` +
+        `- Role: ${role}\n` +
+        `- Technologies: ${technologies.join(', ')}\n` +
+        `- Requirements: ${requirements.join(', ')}\n` +
+        'Only include items that are non-empty above.';
+    }
+  }
+
   const responseText = await invokeTextModelWithTimeout(
-    { modelId: BEDROCK_MODEL_ID, systemPrompt, userPrompt, maxTokens: 2000 },
+    { modelId: BEDROCK_MODEL_ID, systemPrompt: effectiveSystemPrompt, userPrompt, maxTokens: 2000 },
     15_000,
   );
 
@@ -958,9 +1157,125 @@ Analyze this writing and return the JSON assessment.`;
   };
 }
 
+// --- JD analysis handler ---
+
+/**
+ * Handle an `analyze_job_description` request.
+ *
+ * Flow:
+ *   1. Pre-increment the per-user daily JD rate-limit counter (atomic).
+ *      If the counter is already at the daily limit, throws `RateLimitError`
+ *      → HTTP 429 `JD_RATE_LIMIT_EXCEEDED`.
+ *   2. Invoke Nova Pro via `invokeTextModelWithTimeout` (15 s). On JSON parse
+ *      failure, retry once with a stricter "return ONLY valid JSON" prompt.
+ *   3. Normalize the parsed payload into a strict `JobDescriptionContext` and
+ *      return `{ type: 'jd_analysis', jdContext }`.
+ *   4. On any failure after step 1 succeeded, run the compensation decrement
+ *      (best effort) and sanitize the error message through `stripJdFromError`
+ *      before rethrowing as `JdAnalysisError` → HTTP 502 `JD_ANALYSIS_FAILED`.
+ *
+ * Privacy: raw JD text and `jdContext` are NEVER logged — only `logJdEvent`
+ * is used for diagnostic observability.
+ *
+ * Requirements: 3.1, 3.2, 3.5-3.10, 4.1, 4.2, 4.4, 4.5, 11.1, 11.2, 11.7
+ */
+async function handleAnalyzeJobDescription(
+  userId: string,
+  requestId: string,
+  request: ChatRequest,
+): Promise<ChatResponse> {
+  const jdRawText = request.jdRawText!;
+  const tableName = process.env.SESSIONS_TABLE_NAME!;
+  const jdLength = jdRawText.length;
+
+  // Step 1: pre-increment the counter. If we're over the limit, bail out
+  // without touching Bedrock and without needing a compensation decrement.
+  const withinLimit = await incrementJdRateLimit({
+    docClient,
+    tableName,
+    userId,
+    limit: JD_RATE_LIMIT,
+  });
+
+  if (!withinLimit) {
+    logJdEvent({
+      userId,
+      requestId,
+      outcome: 'rate_limited',
+      jdLength,
+      errorCode: 'JD_RATE_LIMIT_EXCEEDED',
+    });
+    throw new RateLimitError('JD analysis daily limit reached');
+  }
+
+  try {
+    const prompt = buildJdAnalysisPrompt(jdRawText);
+
+    // Step 2: first Nova Pro call.
+    const responseText = await invokeTextModelWithTimeout(
+      { modelId: BEDROCK_MODEL_ID, userPrompt: prompt, maxTokens: 2000 },
+      15_000,
+    );
+
+    // Try to parse; on parse failure, retry ONCE with a stricter prompt.
+    let parsed: Partial<JobDescriptionContext>;
+    try {
+      parsed = parseJdAnalysisResponse(responseText);
+    } catch (parseErr) {
+      if (!(parseErr instanceof JdAnalysisError)) {
+        throw parseErr;
+      }
+      const retryText = await invokeTextModelWithTimeout(
+        {
+          modelId: BEDROCK_MODEL_ID,
+          userPrompt: `${prompt}\n\nReturn ONLY a valid JSON object. No markdown, no code fences, no commentary.`,
+          maxTokens: 2000,
+        },
+        15_000,
+      );
+      parsed = parseJdAnalysisResponse(retryText);
+    }
+
+    const jdContext = normalizeJdContext(parsed);
+
+    logJdEvent({ userId, requestId, outcome: 'success', jdLength });
+
+    return {
+      sessionId: '',
+      type: 'jd_analysis',
+      content: '',
+      jdContext,
+    };
+  } catch (err) {
+    // Step 4: compensation decrement (Requirement 4.5) — best effort, so a
+    // secondary DynamoDB failure here does not mask the original error.
+    try {
+      await decrementJdRateLimit({
+        docClient,
+        tableName,
+        userId,
+        limit: JD_RATE_LIMIT,
+      });
+    } catch {
+      // Intentionally swallow — preserving the original error is more useful
+      // to the caller than surfacing a secondary decrement failure.
+    }
+
+    const sanitizedMessage = stripJdFromError(err, jdRawText);
+    logJdEvent({
+      userId,
+      requestId,
+      outcome: 'error',
+      jdLength,
+      errorCode: 'JD_ANALYSIS_FAILED',
+    });
+    throw new JdAnalysisError(sanitizedMessage);
+  }
+}
+
 // --- Action router ---
 
-async function routeAction(userId: string, request: ChatRequest): Promise<ChatResponse> {
+async function routeAction(userId: string, request: ChatRequest, requestId: string = 'unknown'): Promise<ChatResponse> {
   switch (request.action) {
     case 'start_session':
       return handleStartSession(userId, request);
@@ -982,6 +1297,8 @@ async function routeAction(userId: string, request: ChatRequest): Promise<ChatRe
       return handleWritingPrompt(userId, request);
     case 'writing_review':
       return handleWritingReview(userId, request);
+    case 'analyze_job_description':
+      return handleAnalyzeJobDescription(userId, requestId, request);
     default:
       throw new Error(`Unhandled action: ${request.action}`);
   }
@@ -1013,15 +1330,22 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     // Validate request
     const validation = validateRequest(body);
     if (!validation.valid) {
-      return errorResponse(400, 'Bad Request', validation.message);
+      return errorResponse(400, validation.code, validation.message);
     }
 
     // Route to action handler
-    const response = await routeAction(userId, validation.request);
+    const requestId = event.requestContext?.requestId ?? 'unknown';
+    const response = await routeAction(userId, validation.request, requestId);
     return successResponse(200, response);
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return errorResponse(403, 'Forbidden', error.message);
+    }
+    if (error instanceof RateLimitError) {
+      return errorResponse(429, 'JD_RATE_LIMIT_EXCEEDED', error.message);
+    }
+    if (error instanceof JdAnalysisError) {
+      return errorResponse(502, 'JD_ANALYSIS_FAILED', error.message);
     }
     console.error('Unhandled error in /chat handler:', error);
     return errorResponse(500, 'Internal Server Error', 'Terjadi kesalahan internal');
@@ -1029,4 +1353,4 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 };
 
 // Export for testing
-export { validateRequest, extractUserId, routeAction, determineQuestionType, buildContextualPrompt, VALID_ACTIONS, REQUIRED_FIELDS, AuthorizationError, INTRODUCTION_QUESTIONS, SESSION_EXPIRY_HOURS };
+export { validateRequest, extractUserId, routeAction, determineQuestionType, buildContextualPrompt, determineSessionMode, handleAnalyzeJobDescription, VALID_ACTIONS, REQUIRED_FIELDS, VALID_MODES, JD_MIN_LENGTH, JD_MAX_LENGTH, JD_RATE_LIMIT, JD_RETENTION_DAYS, AuthorizationError, RateLimitError, INTRODUCTION_QUESTIONS, SESSION_EXPIRY_HOURS };

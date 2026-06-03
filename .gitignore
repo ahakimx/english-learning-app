@@ -25,4 +25,5 @@ dist-ssr
 .kiro
 .env
 articles
+business-models/
 stitch-designs

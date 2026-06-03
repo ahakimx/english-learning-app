@@ -14,6 +14,7 @@ jest.mock('@aws-sdk/lib-dynamodb', () => ({
   PutCommand: jest.fn((params: unknown) => ({ _type: 'PutCommand', params })),
   GetCommand: jest.fn((params: unknown) => ({ _type: 'GetCommand', params })),
   UpdateCommand: jest.fn((params: unknown) => ({ _type: 'UpdateCommand', params })),
+  QueryCommand: jest.fn((params: unknown) => ({ _type: 'QueryCommand', params })),
 }));
 
 jest.mock('@aws-sdk/client-bedrock-runtime', () => ({

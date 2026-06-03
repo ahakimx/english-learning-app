@@ -9,6 +9,8 @@ import type {
   SeniorityLevel,
   QuestionCategory,
   SessionData,
+  SessionMode,
+  JobDescriptionContext,
   TranscriptEntry,
   FeedbackReport,
   TranscriptEvent,
@@ -20,14 +22,37 @@ import SummaryReport from './SummaryReport'
 import ResumePrompt from './ResumePrompt'
 import LiveTranscriptPanel from './LiveTranscriptPanel'
 import SessionInfoPanel from './SessionInfoPanel'
+import ModeSelector from './ModeSelector'
+import JobDescriptionInput from './JobDescriptionInput'
+import JDAnalysisReview from './JDAnalysisReview'
 import Sidebar from '../dashboard/Sidebar'
 
-type Phase = 'checking' | 'resume-prompt' | 'select' | 'loading' | 'interview' | 'summary'
+type Phase = 'checking' | 'resume-prompt' | 'mode-select' | 'jd-input' | 'jd-analyzing' | 'jd-review' | 'select' | 'loading' | 'interview' | 'summary'
+
+/**
+ * Map a JD analysis error (from the Chat Lambda) to a user-friendly Indonesian
+ * message. Recognized backend error codes (`JD_TOO_SHORT`, `JD_TOO_LONG`,
+ * `JD_RATE_LIMIT_EXCEEDED`, `JD_ANALYSIS_FAILED`, `INVALID_MODE`) each get a
+ * specific message; anything else falls back to a generic retry message.
+ *
+ * Requirements: 5.7, 13.7 — errors from analyze_job_description return the
+ * user to `jd-input` with an Indonesian error message displayed.
+ */
+function mapJdErrorToIndonesian(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (msg.includes('JD_TOO_SHORT')) return 'Deskripsi pekerjaan terlalu pendek. Minimal 100 karakter.'
+  if (msg.includes('JD_TOO_LONG')) return 'Deskripsi pekerjaan terlalu panjang. Maksimal 10.000 karakter.'
+  if (msg.includes('JD_RATE_LIMIT_EXCEEDED')) return 'Anda telah mencapai batas harian analisis JD (5 per hari). Coba lagi besok.'
+  if (msg.includes('JD_ANALYSIS_FAILED')) return 'Gagal menganalisis deskripsi pekerjaan. Silakan coba lagi.'
+  if (msg.includes('INVALID_MODE')) return 'Permintaan tidak valid. Silakan mulai ulang.'
+  return 'Gagal menganalisis deskripsi pekerjaan. Silakan coba lagi.'
+}
 
 export default function SpeakingModule() {
   const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('checking')
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [selectedPosition, setSelectedPosition] = useState<string | null>(null)
   const [summaryReport, setSummaryReport] = useState<SummaryReportType | null>(null)
@@ -37,6 +62,16 @@ export default function SpeakingModule() {
   const [isAbandoning, setIsAbandoning] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showPositionSelector, setShowPositionSelector] = useState(false)
+
+  // JD targeting state (populated by tasks 19.2–19.6 and 20.1)
+  const [mode, setMode] = useState<SessionMode>('quick')
+  const [jdRawText, setJdRawText] = useState<string>('')
+  const [jdContext, setJdContext] = useState<JobDescriptionContext | null>(null)
+  // Flag captured from the initial resume_session response. When the backend
+  // signals the session's jdContext was dropped by the retention policy
+  // (Requirement 9.6), we fall back to Quick behavior on resume and surface a
+  // one-time Indonesian notice.
+  const [jdContextExpired, setJdContextExpired] = useState(false)
 
   // Real-time interview state
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
@@ -183,12 +218,16 @@ export default function SpeakingModule() {
         const response = await chat({ action: 'resume_session' })
         if (response.type === 'session_resumed' && response.sessionData) {
           setResumeSessionData(response.sessionData)
+          // Requirement 9.6: capture the retention-expired flag so the user
+          // sees a one-time Indonesian notice when they confirm resuming, and
+          // the Quick fallback path in handleResumeSession can activate.
+          setJdContextExpired(response.jdContextExpired === true)
           setPhase('resume-prompt')
         } else {
-          setPhase('select')
+          setPhase('mode-select')
         }
       } catch {
-        setPhase('select')
+        setPhase('mode-select')
       }
     }
     checkActiveSession()
@@ -230,8 +269,10 @@ export default function SpeakingModule() {
 
       setSessionId(`session-${Date.now()}`)
       setPhase('interview')
-    } catch {
-      setError('Gagal memulai sesi interview. Silakan coba lagi.')
+    } catch (err) {
+      console.error('[SpeakingModule] handleSelectPosition failed:', err)
+      const detail = err instanceof Error ? err.message : String(err)
+      setError(`Gagal memulai sesi interview: ${detail}`)
       setPhase('select')
     }
   }
@@ -262,6 +303,52 @@ export default function SpeakingModule() {
     setSelectedCategory(resumeSessionData.questionCategory)
     setError(null)
 
+    // -------------------------------------------------------------------
+    // Restore targeted-mode state from sessionData (Task 20.1)
+    //
+    // Requirement 9.2: When sessionData.mode === 'targeted' and jdContext is
+    // present, restore both. Requirement 9.3: When mode is absent but
+    // jdContext is present and non-empty (role is a non-empty string),
+    // treat the session as targeted. Requirement 9.6: When the backend
+    // signalled jdContextExpired, fall back to Quick — do NOT set jdContext,
+    // and show a one-time Indonesian toast. Requirement 9.4: never call
+    // analyze_job_description during resume (enforced by not invoking it
+    // anywhere in this handler).
+    // -------------------------------------------------------------------
+    const resumedJdContext = resumeSessionData.jdContext
+    const resumedMode = resumeSessionData.mode
+    const jdContextPresent =
+      resumedJdContext !== undefined &&
+      resumedJdContext !== null &&
+      typeof resumedJdContext.role === 'string' &&
+      resumedJdContext.role.trim() !== ''
+
+    let resumedAsTargeted = false
+    if (jdContextExpired) {
+      // Quick fallback (Requirement 9.6). Emit the one-time Indonesian toast.
+      setMode('quick')
+      setJdContext(null)
+      setInfo(
+        'Konteks deskripsi pekerjaan telah kedaluwarsa. Melanjutkan dengan mode generik.',
+      )
+      // Consume the flag so the toast only shows once.
+      setJdContextExpired(false)
+    } else if (resumedMode === 'targeted' && jdContextPresent) {
+      // Requirement 9.2
+      setMode('targeted')
+      setJdContext(resumedJdContext!)
+      resumedAsTargeted = true
+    } else if (resumedMode === undefined && jdContextPresent) {
+      // Requirement 9.3 — missing mode + non-empty jdContext => targeted
+      setMode('targeted')
+      setJdContext(resumedJdContext!)
+      resumedAsTargeted = true
+    } else {
+      // Requirement 9.5 — Quick-mode or absent jdContext: unchanged behavior
+      setMode('quick')
+      setJdContext(null)
+    }
+
     const questions = resumeSessionData.questions
 
     if (questions.length === 0) {
@@ -272,12 +359,17 @@ export default function SpeakingModule() {
     setPhase('loading')
 
     try {
-      // Start session with resume — the hook handles direct Bedrock connection
+      // Start session with resume — the hook handles direct Bedrock connection.
+      // Forward targeted-mode fields so the prompt builder receives the JD
+      // context on the resumed session (Requirement 9.2).
       await novaSonic.startSession({
         jobPosition: resumeSessionData.jobPosition,
         seniorityLevel: resumeSessionData.seniorityLevel,
         questionCategory: resumeSessionData.questionCategory,
         resumeSessionId: resumeSessionData.sessionId,
+        ...(resumedAsTargeted && resumedJdContext
+          ? { mode: 'targeted' as const, jdContext: resumedJdContext }
+          : {}),
       })
 
       // Start audio capture
@@ -340,7 +432,7 @@ export default function SpeakingModule() {
     }
     setIsAbandoning(false)
     setResumeSessionData(null)
-    setPhase('select')
+    setPhase('mode-select')
   }
 
   function handleNewSession() {
@@ -350,7 +442,7 @@ export default function SpeakingModule() {
     stopAudioPlayback()
     stopDurationTimer()
 
-    setPhase('select')
+    setPhase('mode-select')
     setSessionId(null)
     setSelectedPosition(null)
     setSelectedSeniority(null)
@@ -359,12 +451,111 @@ export default function SpeakingModule() {
     setResumeSessionData(null)
     setIsAbandoning(false)
     setError(null)
+    setInfo(null)
     setTranscripts([])
     setSessionDuration(0)
     setQuestionCount(0)
     setCurrentQuestionNumber(0)
     setFillerWordCount(0)
     feedbackReportsRef.current = []
+  }
+
+  // --- Handlers for mode selection and JD flow (Requirement 1.7, 1.8) ---
+  function handleModeSelect(selectedMode: SessionMode) {
+    setMode(selectedMode)
+    if (selectedMode === 'quick') {
+      setPhase('select')
+    } else {
+      setPhase('jd-input')
+    }
+  }
+
+  function handleJdInputBack() {
+    // Requirement 2.6: returning to mode selection does not trigger analysis.
+    setPhase('mode-select')
+  }
+
+  // Stubs filled in by task 19.3 (handleAnalyzeJd and handleStartTargetedSession).
+  async function handleAnalyzeJd(rawText: string): Promise<void> {
+    // Requirement 13.4: while already analyzing, a second submit is ignored —
+    // the in-progress call must complete (success or error) before another
+    // analyze attempt is accepted.
+    if (phase === 'jd-analyzing') return
+
+    // Defensive guard: this handler is only valid in targeted flow.
+    if (mode !== 'targeted') return
+
+    setJdRawText(rawText)
+    setError(null)
+    setPhase('jd-analyzing')
+
+    try {
+      // Requirements 5.1, 13.6: on success, transition to jd-review with the
+      // returned jdContext as the source of truth for the review component.
+      const response = await chat({
+        action: 'analyze_job_description',
+        mode: 'targeted',
+        jdRawText: rawText,
+      })
+
+      if (response.type === 'jd_analysis' && response.jdContext) {
+        setJdContext(response.jdContext)
+        setPhase('jd-review')
+      } else {
+        throw new Error('Respons analisis JD tidak valid.')
+      }
+    } catch (err) {
+      // Requirement 13.7: on error, return to jd-input and surface an
+      // Indonesian error message derived from the backend error code.
+      setError(mapJdErrorToIndonesian(err))
+      setPhase('jd-input')
+    }
+  }
+
+  async function handleStartTargetedSession(editedContext: JobDescriptionContext): Promise<void> {
+    // Requirements 5.7, 6.1, 6.2, 6.3: the edited context (from the review
+    // step) is the source of truth; it flows into start_session with
+    // mode: 'targeted' and the full jdContext payload.
+    setJdContext(editedContext)
+    setPhase('loading')
+    setError(null)
+    setSelectedPosition(editedContext.role)
+    setSelectedSeniority(editedContext.suggestedSeniority)
+    setSelectedCategory(editedContext.suggestedCategory)
+
+    try {
+      // Requirement 6.8: seniority and category fall back to the JD context
+      // suggestions, matching what the backend does when they are omitted.
+      await novaSonic.startSession({
+        jobPosition: editedContext.role,
+        seniorityLevel: editedContext.suggestedSeniority,
+        questionCategory: editedContext.suggestedCategory,
+        mode: 'targeted',
+        jdContext: editedContext,
+      })
+
+      await audioCapture.start()
+
+      // Reset interview state — same as handleSelectPosition's startup path.
+      setTranscripts([])
+      setSessionDuration(0)
+      setQuestionCount(0)
+      setCurrentQuestionNumber(1)
+      setFillerWordCount(0)
+      feedbackReportsRef.current = []
+      transcriptIdCounterRef.current = 0
+      currentQuestionIdRef.current = `q-${Date.now()}`
+
+      startDurationTimer()
+
+      setSessionId(`session-${Date.now()}`)
+      setPhase('interview')
+    } catch {
+      // Requirement 5.9 (failure path): on failure, return to `jd-review` with
+      // the context intact so the user can retry without re-entering the JD.
+      setError('Gagal memulai sesi interview. Silakan coba lagi.')
+      setPhase('jd-review')
+    }
   }
 
   // Map connection state for SessionInfoPanel
@@ -415,6 +606,33 @@ export default function SpeakingModule() {
             </div>
           )}
 
+          {/*
+            One-time Indonesian toast displayed when a targeted session's
+            jdContext was dropped by the retention policy (Requirement 9.6).
+            The `info` state is set once in `handleResumeSession` and cleared
+            by the dismiss button below, on `handleNewSession`, or naturally
+            when the user completes the resumed session. No auto-dismiss so
+            the user has a chance to read the notice even during the brief
+            `loading` → `interview` transition.
+          */}
+          {info && (
+            <div
+              role="status"
+              data-testid="info-toast"
+              className="mb-6 p-4 bg-secondary-container border border-outline-variant/20 rounded-lg text-on-secondary-container text-sm flex items-start justify-between gap-4"
+            >
+              <span>{info}</span>
+              <button
+                type="button"
+                onClick={() => setInfo(null)}
+                aria-label="Tutup pemberitahuan"
+                className="shrink-0 text-on-secondary-container/70 hover:text-on-secondary-container"
+              >
+                <span className="material-symbols-outlined text-base">close</span>
+              </button>
+            </div>
+          )}
+
           {phase === 'checking' && (
             <div className="flex flex-col items-center justify-center py-16" role="status" data-testid="checking-indicator">
               <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary border-t-transparent mb-4" />
@@ -428,6 +646,41 @@ export default function SpeakingModule() {
               onResume={handleResumeSession}
               onStartNew={handleAbandonAndStartNew}
               isAbandoning={isAbandoning}
+            />
+          )}
+
+          {/* ===== MODE SELECTION PHASE (Requirement 1.1, 1.7, 1.8) ===== */}
+          {phase === 'mode-select' && (
+            <ModeSelector onSelect={handleModeSelect} />
+          )}
+
+          {/* ===== JD INPUT PHASE ===== */}
+          {phase === 'jd-input' && (
+            <JobDescriptionInput
+              initialValue={jdRawText}
+              onSubmit={handleAnalyzeJd}
+              onBack={handleJdInputBack}
+            />
+          )}
+
+          {/* ===== JD ANALYZING PHASE — in-progress indicator only (Requirement 13.4) ===== */}
+          {phase === 'jd-analyzing' && (
+            <div
+              className="flex flex-col items-center justify-center py-16"
+              role="status"
+              data-testid="jd-analyzing-indicator"
+            >
+              <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary border-t-transparent mb-4" />
+              <p className="text-on-surface-variant font-body">Menganalisis deskripsi pekerjaan...</p>
+            </div>
+          )}
+
+          {/* ===== JD REVIEW PHASE ===== */}
+          {phase === 'jd-review' && jdContext && (
+            <JDAnalysisReview
+              initialContext={jdContext}
+              onStart={handleStartTargetedSession}
+              onBack={() => setPhase('jd-input')}
             />
           )}
 
