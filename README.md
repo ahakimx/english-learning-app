@@ -22,13 +22,19 @@ Aplikasi web untuk belajar bahasa Inggris yang dirancang khusus untuk persiapan 
 
 ## Fitur Utama
 
-### 🎤 Speaking Module — Simulasi Interview AI
-- Pilih posisi pekerjaan (Software Engineer, Product Manager, Data Analyst, dll.)
-- AI menghasilkan pertanyaan interview yang relevan
-- Pertanyaan dibacakan menggunakan Amazon Polly (Neural voice)
-- Rekam jawaban via mikrofon, otomatis di-transkripsi oleh Amazon Transcribe
-- Dapatkan feedback detail dari AI: grammar, vocabulary, relevance, filler words, coherence
+### 🎤 Speaking Module — Simulasi Interview AI Real-Time
+- Percakapan interview **real-time speech-to-speech** menggunakan **Amazon Nova Sonic** (Bedrock bidirectional streaming) — AI berbicara, Anda menjawab, AI merespons secara natural tanpa tombol rekam-stop
+- Mendukung **barge-in / interrupt**: Anda bisa menyela AI saat sedang berbicara
+- **Mode interview**:
+  - **Pilih posisi pekerjaan** (Software Engineer, Product Manager, Data Analyst, dll.) dengan level senioritas
+  - **JD Targeting** — paste job description asli, AI menganalisis dan menghasilkan pertanyaan yang relevan dengan JD tersebut
+  - **Hybrid questions** — kombinasi pertanyaan umum dan pertanyaan spesifik posisi/JD
+- **Resume session** — lanjutkan sesi interview yang belum selesai
+- Live transcript percakapan (AI & user) ditampilkan real-time
+- Feedback detail per jawaban dari AI: grammar, vocabulary, relevance, filler words, coherence
 - Summary report di akhir sesi dengan skor dan rekomendasi
+
+> **Catatan arsitektur**: Streaming audio real-time ditangani oleh proxy server (Socket.IO) yang menjembatani browser ke Amazon Nova Sonic via Bedrock. Pembuatan sesi, analisis feedback per jawaban, dan summary report tetap melalui REST API (`/chat`).
 
 ### 📝 Grammar Module — Quiz Multiple Choice
 - Pilih topik: Tenses, Articles, Prepositions, Conditionals, Passive Voice
@@ -56,12 +62,13 @@ Aplikasi web untuk belajar bahasa Inggris yang dirancang khusus untuk persiapan 
 | Routing | react-router-dom | |
 | Auth & Storage | aws-amplify (Cognito, S3) | [Amplify + Cognito Auth](https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/authenticate-react-app-users-cognito-amplify-ui.html) |
 | Backend | AWS Lambda (Node.js/TypeScript) | [Lambda TypeScript Handler](https://docs.aws.amazon.com/lambda/latest/dg/typescript-handler.html) |
-| API | API Gateway REST | [API Gateway REST API + Lambda](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-create-api-as-simple-proxy-for-lambda.html) |
-| AI | Amazon Bedrock (Claude Haiku) | [Bedrock Model Access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) |
-| Speech-to-Text | Amazon Transcribe | [Transcribe Getting Started](https://docs.aws.amazon.com/transcribe/latest/dg/getting-started.html) |
-| Text-to-Speech | Amazon Polly (Neural voices) | [Polly Neural Voices](https://docs.aws.amazon.com/polly/latest/dg/neural-voices.html) |
+| REST API | API Gateway REST | [API Gateway REST API + Lambda](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-create-api-as-simple-proxy-for-lambda.html) |
+| Real-Time Speech | **Amazon Nova Sonic** (Bedrock bidirectional streaming) | [InvokeModelWithBidirectionalStream](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithBidirectionalStream.html) |
+| Real-Time Transport | Socket.IO proxy server (Express) di EC2 + WebSocket API Gateway | [API Gateway WebSocket](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html) |
+| AI (text) | Amazon Bedrock (Nova Pro / Claude) | [Bedrock Model Access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) |
 | Database | Amazon DynamoDB | [DynamoDB Getting Started](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GettingStartedDynamoDB.html) |
 | File Storage | Amazon S3 | [S3 Uploading Objects](https://docs.aws.amazon.com/AmazonS3/latest/userguide/upload-objects.html) |
+| Compute (proxy) | Amazon EC2 (t3.micro) | [EC2 Getting Started](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html) |
 | Infrastructure | AWS CDK (TypeScript) | [CDK TypeScript Guide](https://docs.aws.amazon.com/cdk/v2/guide/work-with-cdk-typescript.html) |
 | Hosting | AWS Amplify Hosting | [Deploy Web App on Amplify](https://docs.aws.amazon.com/hands-on/latest/deploy-webapp-amplify/deploy-webapp-amplify.html) |
 | Testing | Vitest, Jest, React Testing Library, fast-check | |
@@ -71,28 +78,37 @@ Aplikasi web untuk belajar bahasa Inggris yang dirancang khusus untuk persiapan 
 ## Arsitektur
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   Frontend (React)                   │
-│              AWS Amplify Hosting / Vite              │
-└──────────────┬──────────────────────┬───────────────┘
-               │ HTTPS + JWT          │ Cognito Auth
-               ▼                      ▼
-┌──────────────────────┐   ┌──────────────────────┐
-│    API Gateway REST  │   │   Amazon Cognito      │
-│  /chat /transcribe   │   │   (User Pool)         │
-│  /speak /progress    │   └──────────────────────┘
-└──────┬───┬───┬───┬───┘
-       │   │   │   │
-       ▼   ▼   ▼   ▼
-┌──────┐┌──────┐┌──────┐┌──────┐
-│ Chat ││Trans-││Speak ││Prog- │  ← Lambda Functions
-│      ││cribe ││      ││ress  │
-└──┬───┘└──┬───┘└──┬───┘└──┬───┘
-   │       │       │       │
-   ▼       ▼       ▼       ▼
-Bedrock  Transcribe Polly  DynamoDB
-DynamoDB  S3
+┌──────────────────────────────────────────────────────────────┐
+│                        Frontend (React)                        │
+│                   AWS Amplify Hosting / Vite                   │
+└───┬───────────────────────┬──────────────────────┬────────────┘
+    │ HTTPS + JWT           │ Socket.IO (audio)    │ Cognito Auth
+    │ (REST)                │ real-time            ▼
+    ▼                       ▼              ┌──────────────────┐
+┌──────────────────────┐  ┌────────────┐  │  Amazon Cognito  │
+│   API Gateway REST   │  │  Nova Sonic │  │   (User Pool)    │
+│  /chat /transcribe   │  │ Proxy Server│  └──────────────────┘
+│  /speak /progress    │  │ (EC2 t3.micro)
+└──┬───┬───┬───┬───────┘  └──────┬──────┘
+   │   │   │   │                 │ bidirectional stream
+   ▼   ▼   ▼   ▼                 ▼
+┌──────┐┌──────┐┌──────┐┌──────┐  ┌─────────────────────────┐
+│ Chat ││Trans-││Speak ││Prog- │  │   Amazon Bedrock        │
+│      ││cribe ││      ││ress  │  │   Nova Sonic (speech)   │
+└──┬───┘└──────┘└──────┘└──┬───┘  │   Nova Pro / Claude     │
+   │                       │      └─────────────────────────┘
+   ▼                       ▼
+Bedrock                 DynamoDB
+DynamoDB / S3
+
+┌────────────────────────────────────────────────────────────┐
+│  WebSocket API Gateway (alternatif real-time path)          │
+│  $connect (Auth) · message (NovaSonic) · $disconnect        │
+│  → Lambda → Bedrock Nova Sonic + DynamoDB                   │
+└────────────────────────────────────────────────────────────┘
 ```
+
+> **Dua jalur real-time**: aplikasi menyediakan proxy server Socket.IO di EC2 (always-on, tanpa cold start, ~$8/bulan) sebagai jalur utama, dan WebSocket API Gateway + Lambda sebagai jalur serverless alternatif. Keduanya menjembatani audio browser ke Amazon Nova Sonic via Bedrock `InvokeModelWithBidirectionalStream`.
 
 ### CDK Stacks
 
@@ -100,7 +116,9 @@ DynamoDB  S3
 |-------|-----------|
 | `AuthStack` | Cognito User Pool & Client |
 | `StorageStack` | DynamoDB (Sessions + Progress) & S3 (Audio) |
-| `ApiStack` | API Gateway + 4 Lambda functions |
+| `ApiStack` | API Gateway REST + Lambda functions (`/chat`, `/transcribe`, `/speak`, `/progress`) |
+| `WebSocketStack` | WebSocket API Gateway + Lambda (Auth, NovaSonic, Cleanup) untuk real-time speaking |
+| `SonicServerStack` | EC2 t3.micro menjalankan proxy server Nova Sonic (Socket.IO) + Elastic IP |
 | `FrontendStack` | Amplify Hosting |
 
 ---
@@ -114,9 +132,9 @@ Pastikan tools berikut sudah terinstall:
 - **AWS CLI** v2 — [Install & Configure Guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html)
 - **AWS CDK CLI** — `npm install -g aws-cdk` — [CDK Getting Started](https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html)
 - **AWS Account** dengan akses ke:
-  - Amazon Bedrock (Claude Haiku model harus di-enable di region yang digunakan)
-  - Amazon Cognito, Amazon Transcribe, Amazon Polly
-  - DynamoDB, S3, Lambda, API Gateway
+  - Amazon Bedrock (model **Amazon Nova Sonic** untuk speech real-time, dan **Nova Pro / Claude** untuk analisis teks — harus di-enable di region yang digunakan)
+  - Amazon Cognito
+  - DynamoDB, S3, Lambda, API Gateway (REST + WebSocket), EC2
 
 ### Enable Amazon Bedrock Model
 
@@ -124,14 +142,18 @@ Sejak update terbaru, akses ke model foundation di Amazon Bedrock sudah otomatis
 
 Referensi: [Access Amazon Bedrock foundation models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html)
 
+Aplikasi ini menggunakan **dua model Bedrock**: **Amazon Nova Sonic** (speech-to-speech real-time) dan model teks **Nova Pro / Anthropic Claude** (analisis & feedback). Keduanya perlu di-enable di region yang sama. Model Amazon (Nova) biasanya bisa langsung diaktifkan, sedangkan model Anthropic memerlukan satu langkah tambahan di bawah.
+
 #### Langkah 1: Submit Use Case Details (Wajib untuk Anthropic — Sekali per Akun)
 
 Anthropic mewajibkan pelanggan baru untuk submit use case details sebelum bisa menggunakan model mereka. Ini hanya perlu dilakukan **sekali per akun AWS** (atau sekali di management account organisasi). Informasi yang Anda kirimkan akan dibagikan ke Anthropic.
 
 1. Buka [Amazon Bedrock Console](https://console.aws.amazon.com/bedrock/)
 2. Pilih region (misal: `us-east-1`)
-3. Buka **Model catalog** dan pilih salah satu model Anthropic (misal: Claude Haiku)
-4. Anda akan diminta mengisi formulir **use case details**:
+3. Buka **Model access** / **Model catalog** dan aktifkan model yang dibutuhkan:
+   - **Amazon Nova Sonic** (untuk speech real-time)
+   - **Amazon Nova Pro** dan/atau **Anthropic Claude** (untuk analisis teks)
+4. Untuk model Anthropic, Anda akan diminta mengisi formulir **use case details**:
    - Deskripsi use case (misal: "Educational web application for English language learning and job interview preparation")
    - Informasi perusahaan/organisasi
 5. Submit formulir tersebut
@@ -142,11 +164,11 @@ Anthropic mewajibkan pelanggan baru untuk submit use case details sebelum bisa m
 #### Langkah 2: Verifikasi Akses Model
 
 1. Di Bedrock Console, buka **Model catalog**
-2. Cari **Claude 3 Haiku**
+2. Cari **Amazon Nova Sonic** dan model teks (**Nova Pro** / **Claude**)
 3. Klik model dan coba buka di **Playground** untuk memastikan model bisa digunakan
 4. Jika muncul `AccessDeniedException`, pastikan:
    - IAM role memiliki permission AWS Marketplace (`aws-marketplace:Subscribe`, `aws-marketplace:ViewSubscriptions`)
-   - Use case details sudah di-submit (Langkah 1)
+   - Use case details sudah di-submit untuk model Anthropic (Langkah 1)
    - Akun AWS memiliki payment method yang valid
    - Tunggu hingga 2 menit setelah permission diberikan (auto-subscription bisa memakan waktu hingga 15 menit)
 
@@ -169,7 +191,10 @@ IAM role yang digunakan untuk deploy CDK dan menjalankan Lambda harus memiliki p
     },
     {
       "Effect": "Allow",
-      "Action": "bedrock:InvokeModel",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithBidirectionalStream"
+      ],
       "Resource": "*"
     }
   ]
@@ -197,6 +222,11 @@ npm install
 
 # Backend/Infrastructure dependencies
 cd infra
+npm install
+cd ..
+
+# Nova Sonic proxy server dependencies
+cd server
 npm install
 cd ..
 ```
@@ -242,12 +272,27 @@ npx cdk deploy EnglishLearningApp-AuthStack
 # 2. Storage (tidak ada dependency)
 npx cdk deploy EnglishLearningApp-StorageStack
 
-# 3. API (depends on Auth + Storage)
+# 3. API REST (depends on Auth + Storage)
 npx cdk deploy EnglishLearningApp-ApiStack
 
-# 4. Frontend (depends on Auth + Storage + API)
+# 4. WebSocket API (depends on Auth + Storage) — jalur real-time serverless
+npx cdk deploy EnglishLearningApp-WebSocketStack
+
+# 5. Sonic Server (EC2 proxy Nova Sonic, ~$8/bulan / free tier)
+npx cdk deploy EnglishLearningApp-SonicServerStack
+
+# 6. Frontend (depends on Auth + Storage + API)
 npx cdk deploy EnglishLearningApp-FrontendStack
 ```
+
+### Deploy Nova Sonic Proxy Server
+
+`SonicServerStack` membuat EC2 t3.micro dengan systemd service, tapi kode server (`server/`) perlu di-deploy ke instance. Setelah stack ter-deploy:
+
+1. Catat `SonicServerPublicIp` / `InstanceId` dari output CDK
+2. Deploy kode `server/` ke instance (via SSM Session Manager, `scp`, atau Docker — lihat `server/Dockerfile`)
+3. Pastikan service berjalan di port `3001`
+4. Set `VITE_SONIC_SERVER_URL=http://<public-ip>:3001` di environment frontend (Amplify console atau `.env`)
 
 ### Catat Output
 
@@ -258,6 +303,9 @@ EnglishLearningApp-AuthStack.UserPoolId = us-east-1_xxxxxxxxx
 EnglishLearningApp-AuthStack.UserPoolClientId = xxxxxxxxxxxxxxxxxxxxxxxxxx
 EnglishLearningApp-AuthStack.IdentityPoolId = us-east-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 EnglishLearningApp-ApiStack.ApiUrl = https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/
+EnglishLearningApp-WebSocketStack.WebSocketUrl = wss://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/production
+EnglishLearningApp-SonicServerStack.SonicServerUrl = http://xx.xx.xx.xx:3001
+EnglishLearningApp-SonicServerStack.SonicServerPublicIp = xx.xx.xx.xx
 EnglishLearningApp-FrontendStack.AmplifyAppId = dxxxxxxxxxx
 EnglishLearningApp-FrontendStack.AmplifyAppDefaultDomain = dxxxxxxxxxx.amplifyapp.com
 ```
@@ -405,12 +453,16 @@ FrontendStack sudah otomatis meng-inject environment variables dari stack lain:
 
 | Variable | Source | Deskripsi |
 |----------|--------|-----------|
-| `VITE_API_URL` | ApiStack output | URL API Gateway |
+| `VITE_API_URL` | ApiStack output | URL API Gateway REST |
+| `VITE_WEBSOCKET_URL` | WebSocketStack output | URL WebSocket API (jalur real-time serverless) |
+| `VITE_SONIC_SERVER_URL` | SonicServerStack output | URL proxy server Nova Sonic (EC2) — set manual setelah EC2 deploy |
 | `VITE_USER_POOL_ID` | AuthStack output | Cognito User Pool ID |
 | `VITE_USER_POOL_CLIENT_ID` | AuthStack output | Cognito App Client ID |
 | `VITE_IDENTITY_POOL_ID` | AuthStack output | Cognito Identity Pool ID |
 | `VITE_AUDIO_BUCKET_NAME` | StorageStack output | S3 bucket untuk audio |
 | `VITE_AWS_REGION` | CDK region | AWS Region |
+
+> **Penting**: `VITE_SONIC_SERVER_URL` tidak di-inject otomatis oleh CDK (cross-stack reference EC2). Set manual di Amplify console setelah `SonicServerStack` ter-deploy dan kode server berjalan.
 
 Jika perlu update manual, bisa via Amplify Console:
 1. Buka app di Amplify Console
@@ -456,17 +508,33 @@ Edit `.env`:
 VITE_API_URL=https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod
 VITE_USER_POOL_ID=us-east-1_xxxxxxxxx
 VITE_USER_POOL_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
+VITE_IDENTITY_POOL_ID=us-east-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 VITE_AUDIO_BUCKET_NAME=englishlearningapp-storagestack-audiobucketxxxxxxxx
 VITE_AWS_REGION=us-east-1
+
+# Nova Sonic proxy server (lokal: http://localhost:3001, produksi: URL EC2/App Runner)
+VITE_SONIC_SERVER_URL=http://localhost:3001
+
+# WebSocket URL — OPSIONAL (backward compatibility, tidak lagi wajib untuk speaking module)
+VITE_WEBSOCKET_URL=
+
+# Bedrock Model IDs (ubah untuk ganti model AI)
+BEDROCK_SONIC_MODEL_ID=amazon.nova-2-sonic-v1:0
+BEDROCK_TEXT_MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
 ```
 
 | Variable | Deskripsi | Contoh |
 |----------|-----------|--------|
-| `VITE_API_URL` | URL API Gateway (termasuk stage) | `https://xxx.execute-api.us-east-1.amazonaws.com/prod` |
+| `VITE_API_URL` | URL API Gateway REST (termasuk stage) | `https://xxx.execute-api.us-east-1.amazonaws.com/prod` |
+| `VITE_SONIC_SERVER_URL` | URL proxy server Nova Sonic (jalur utama speaking) | `http://localhost:3001` / `https://xxx.awsapprunner.com` |
+| `VITE_WEBSOCKET_URL` | URL WebSocket API (opsional, backward compatibility) | `wss://xxx.execute-api.us-east-1.amazonaws.com/production` |
 | `VITE_USER_POOL_ID` | Cognito User Pool ID | `us-east-1_AbCdEfGhI` |
 | `VITE_USER_POOL_CLIENT_ID` | Cognito App Client ID | `1a2b3c4d5e6f7g8h9i0j` |
+| `VITE_IDENTITY_POOL_ID` | Cognito Identity Pool ID | `us-east-1:xxxx-xxxx-xxxx` |
 | `VITE_AUDIO_BUCKET_NAME` | Nama S3 bucket untuk audio | `englishlearningapp-storagestack-audio123` |
 | `VITE_AWS_REGION` | AWS Region | `us-east-1` |
+| `BEDROCK_SONIC_MODEL_ID` | Model Nova Sonic (speech) | `amazon.nova-2-sonic-v1:0` |
+| `BEDROCK_TEXT_MODEL_ID` | Model teks (analisis/feedback) | `us.anthropic.claude-haiku-4-5-...` |
 
 Untuk Amplify Hosting, update environment variables di console Amplify atau via CDK.
 
@@ -474,14 +542,28 @@ Untuk Amplify Hosting, update environment variables di console Amplify atau via 
 
 ## Menjalankan Aplikasi (Lokal)
 
+Speaking module butuh proxy server Nova Sonic berjalan secara lokal. Jalankan frontend + server proxy sekaligus:
+
 ```bash
-# Pastikan .env sudah dikonfigurasi
+# Pastikan .env (root) dan server/.env sudah dikonfigurasi
+npm run dev:all
+```
+
+`dev:all` menjalankan frontend (Vite) dan proxy server (`server/`) secara paralel. Atau jalankan terpisah:
+
+```bash
+# Terminal 1 — frontend
 npm run dev
+
+# Terminal 2 — proxy server Nova Sonic (port 3001)
+npm run server
 ```
 
 Buka browser di `http://localhost:5173`
 
-> **Catatan**: Backend AWS harus sudah di-deploy karena frontend berkomunikasi langsung dengan API Gateway.
+> **Catatan**:
+> - Backend AWS (Auth, Storage, API REST) harus sudah di-deploy karena frontend berkomunikasi langsung dengan API Gateway.
+> - Proxy server lokal membutuhkan AWS credentials yang punya akses Bedrock (`InvokeModelWithBidirectionalStream`) untuk Nova Sonic.
 
 ### Build untuk Production
 
@@ -514,23 +596,22 @@ Setiap card modul menampilkan progress terakhir Anda.
 ### Menggunakan Speaking Module
 
 1. Klik card **Speaking** di dashboard
-2. Pilih posisi pekerjaan yang ingin dilatih:
-   - Software Engineer
-   - Product Manager
-   - Data Analyst
-   - Marketing Manager
-   - UI/UX Designer
-3. AI akan menghasilkan pertanyaan interview → pertanyaan dibacakan via audio
-4. Klik tombol **Rekam** 🔴 untuk mulai menjawab via mikrofon
-5. Klik **Stop** untuk berhenti merekam
-6. Tunggu proses transkripsi dan analisis AI
-7. Lihat feedback detail:
+2. Pilih mode interview:
+   - **Berdasarkan Posisi** — pilih posisi pekerjaan (Software Engineer, Product Manager, Data Analyst, Marketing Manager, UI/UX Designer) dan level senioritas
+   - **JD Targeting** — paste job description asli, AI menganalisis JD lalu menghasilkan pertanyaan yang relevan
+3. Jika ada sesi sebelumnya yang belum selesai, aplikasi menawarkan **Resume Session** untuk melanjutkan
+4. Interview berlangsung **real-time speech-to-speech**:
+   - AI (Amazon Nova Sonic) langsung berbicara mengajukan pertanyaan
+   - Jawab langsung via mikrofon — tidak perlu tombol rekam/stop
+   - Anda bisa **menyela (interrupt/barge-in)** saat AI sedang bicara
+   - Live transcript percakapan ditampilkan real-time
+5. Setiap jawaban dianalisis AI dan menghasilkan feedback:
    - Skor per kriteria (grammar, vocabulary, relevance, filler words, coherence)
    - Daftar kesalahan grammar dan koreksinya
    - Filler words yang terdeteksi
    - Saran perbaikan dan contoh jawaban yang lebih baik
-8. Klik **Pertanyaan Berikutnya** atau **Akhiri Sesi**
-9. Di akhir sesi, lihat Summary Report dengan skor keseluruhan dan rekomendasi
+6. Klik **Akhiri Sesi** kapan saja
+7. Di akhir sesi, lihat Summary Report dengan skor keseluruhan dan rekomendasi
 
 ### Menggunakan Grammar Module
 
@@ -589,10 +670,14 @@ Endpoint utama untuk semua interaksi AI.
 
 ```json
 {
-  "action": "start_session | analyze_answer | next_question | end_session | grammar_quiz | grammar_explain | writing_prompt | writing_review",
-  "sessionId": "uuid (opsional, required untuk action selain start_session/grammar_quiz/writing_prompt)",
+  "action": "start_session | analyze_answer | next_question | end_session | resume_session | abandon_session | analyze_job_description | grammar_quiz | grammar_explain | writing_prompt | writing_review",
+  "sessionId": "uuid (opsional, required untuk action berbasis sesi mis. end_session/abandon_session)",
   "jobPosition": "string (required untuk start_session)",
+  "seniorityLevel": "junior | mid | senior | lead (opsional untuk start_session)",
+  "questionCategory": "string (opsional — kategori pertanyaan)",
   "transcription": "string (required untuk analyze_answer)",
+  "jdRawText": "string (required untuk analyze_job_description)",
+  "mode": "quick | targeted (required untuk analyze_job_description)",
   "grammarTopic": "string (required untuk grammar_quiz/grammar_explain)",
   "selectedAnswer": "string (required untuk grammar_explain)",
   "writingType": "essay | email (required untuk writing_prompt/writing_review)",
@@ -605,14 +690,17 @@ Endpoint utama untuk semua interaksi AI.
 ```json
 {
   "sessionId": "uuid",
-  "type": "question | feedback | summary | quiz | explanation | writing_prompt | writing_review",
+  "type": "question | feedback | summary | quiz | explanation | writing_prompt | writing_review | jd_analysis",
   "content": "string",
   "feedbackReport": { },
   "summaryReport": { },
   "quizData": { },
-  "writingReview": { }
+  "writingReview": { },
+  "jdAnalysis": { }
 }
 ```
+
+> **Catatan**: Interaksi audio real-time interview (mengirim audio, menerima audio AI, transcript live) **tidak** lewat `/chat`, melainkan melalui koneksi Socket.IO ke proxy server Nova Sonic (`VITE_SONIC_SERVER_URL`). Endpoint `/chat` menangani lifecycle sesi (`start_session`, `resume_session`, `end_session`), analisis feedback per jawaban (`analyze_answer`), analisis JD (`analyze_job_description`), serta modul Grammar & Writing.
 
 ### POST /transcribe
 
@@ -674,6 +762,23 @@ Update data progress setelah aktivitas pembelajaran.
 }
 ```
 
+### Real-Time Speech (Nova Sonic)
+
+Interview speaking berjalan via **Socket.IO** ke proxy server Nova Sonic (`VITE_SONIC_SERVER_URL`), bukan REST. Event utama:
+
+| Arah | Event | Payload | Deskripsi |
+|------|-------|---------|-----------|
+| client → server | `startSession` | `{ jobPosition, seniorityLevel, questionCategory }` | Membuka stream Nova Sonic |
+| client → server | `audioChunk` | base64 PCM | Mengirim audio mic user |
+| client → server | `interrupt` | — | Barge-in / menyela AI |
+| client → server | `endSession` | — | Menutup stream |
+| server → client | `audioChunk` | base64 PCM | Audio suara AI |
+| server → client | `transcript` | `{ role, text, partial }` | Transcript live AI/user |
+| server → client | `turnSwitch` | `{ from, to }` | Pergantian giliran bicara |
+| server → client | `error` | `{ code, message }` | Error dari Nova Sonic |
+
+> Jalur serverless alternatif tersedia via WebSocket API Gateway (`VITE_WEBSOCKET_URL`) dengan route `$connect` (auth JWT), `message`, dan `$disconnect`.
+
 ### Error Responses
 
 | Status | Deskripsi |
@@ -701,10 +806,7 @@ Format error response:
 npm test
 ```
 
-Menjalankan 93 tests di 16 test files, mencakup:
-- Unit tests untuk semua komponen React
-- Property-based tests menggunakan fast-check
-- Integration tests
+Mencakup unit tests untuk semua komponen React, property-based tests (fast-check), dan integration tests untuk flow tiap modul (Auth, Speaking, Grammar, Writing). Termasuk property tests untuk fitur Nova Sonic speaking, JD targeting, dan session resume.
 
 ### Backend Tests (Jest)
 
@@ -713,7 +815,7 @@ cd infra
 npm test
 ```
 
-Menjalankan CDK assertion tests dan Lambda handler tests.
+Menjalankan CDK assertion tests dan Lambda handler tests, termasuk property-based tests untuk JD targeting, hybrid question type, session resume, dan auto-abandon.
 
 ### Menjalankan Test Tertentu
 
@@ -736,32 +838,49 @@ english-learning-app/
 │   ├── components/
 │   │   ├── auth/                     # Login, Register, ProtectedRoute
 │   │   ├── dashboard/                # Dashboard, ModuleCard, ProgressOverview
-│   │   ├── speaking/                 # Interview simulation (7 komponen)
-│   │   ├── grammar/                  # Quiz grammar (4 komponen)
-│   │   ├── writing/                  # Latihan menulis (4 komponen)
-│   │   └── progress/                 # Progress tracking (2 komponen)
-│   ├── hooks/                        # useAuth, useAudioRecorder
+│   │   ├── speaking/                 # Interview real-time: ModeSelector, JobPositionSelector,
+│   │   │                             # JobDescriptionInput, JDAnalysisReview, InterviewSession,
+│   │   │                             # LiveTranscriptPanel, ResumePrompt, FeedbackDisplay, SummaryReport
+│   │   ├── grammar/                  # Quiz grammar
+│   │   ├── writing/                  # Latihan menulis
+│   │   └── progress/                 # Progress tracking
+│   ├── hooks/                        # useAuth, useNovaSonic, useAudioCapture, useAudioPlayback, useAudioRecorder
 │   ├── services/                     # apiClient, authService, audioService
 │   ├── types/                        # TypeScript interfaces
 │   ├── config/                       # Amplify configuration
 │   └── App.tsx                       # Root component + routing
 │
+├── server/                           # Nova Sonic proxy server (Express + Socket.IO)
+│   ├── src/                          # Server source (bidirectional Bedrock streaming)
+│   ├── Dockerfile                    # Container image untuk EC2/App Runner
+│   └── package.json
+│
+├── public/
+│   └── audio-playback-processor.js   # AudioWorklet untuk streaming playback Nova Sonic
+│
+├── scripts/                          # Helper scripts (mis. setup-nginx.sh)
+│
 ├── infra/                            # AWS CDK Infrastructure
-│   ├── bin/app.ts                    # CDK app entry point
+│   ├── bin/app.ts                    # CDK app entry point (6 stacks)
 │   ├── lib/
 │   │   ├── auth-stack.ts             # Cognito
-│   │   ├── api-stack.ts              # API Gateway + Lambda
+│   │   ├── api-stack.ts              # API Gateway REST + Lambda
 │   │   ├── storage-stack.ts          # DynamoDB + S3
+│   │   ├── websocket-stack.ts        # WebSocket API + Lambda (Nova Sonic)
+│   │   ├── sonic-server-stack.ts     # EC2 proxy Nova Sonic
+│   │   ├── apprunner-stack.ts        # (opsional) App Runner deploy untuk proxy
 │   │   └── frontend-stack.ts         # Amplify Hosting
 │   ├── lambda/
 │   │   ├── chat/index.ts             # AI interactions (Bedrock)
-│   │   ├── transcribe/index.ts       # Speech-to-text
-│   │   ├── speak/index.ts            # Text-to-speech
-│   │   └── progress/index.ts         # Progress CRUD
+│   │   ├── transcribe/index.ts       # Speech-to-text (legacy/utility)
+│   │   ├── speak/index.ts            # Text-to-speech (legacy/utility)
+│   │   ├── progress/index.ts         # Progress CRUD
+│   │   ├── websocket/                # auth, nova-sonic, cleanup handlers
+│   │   └── shared/                   # Shared backend utilities
 │   └── test/                         # Backend tests
 │
 ├── .env.example                      # Template environment variables
-├── package.json                      # Frontend dependencies
+├── package.json                      # Frontend deps + script dev:all (frontend + server)
 ├── vite.config.ts                    # Vite + Vitest config
 └── tsconfig.json                     # TypeScript config
 ```
@@ -787,12 +906,18 @@ english-learning-app/
 ### AI analysis timeout
 - Amazon Bedrock kadang membutuhkan waktu lebih lama
 - Klik "Coba lagi" jika muncul pesan timeout
-- Pastikan model Claude Haiku sudah di-enable di region yang digunakan
+- Pastikan model Nova Pro / Claude (analisis teks) sudah di-enable di region yang digunakan
+
+### Speaking tidak terhubung / "Cannot connect to Nova Sonic server"
+- Pastikan proxy server berjalan: `npm run server` (lokal) atau EC2 instance aktif (produksi)
+- Cek `VITE_SONIC_SERVER_URL` mengarah ke URL server yang benar
+- Pastikan model **Amazon Nova Sonic** sudah di-enable di Bedrock dan IAM punya `bedrock:InvokeModelWithBidirectionalStream`
+- Untuk EC2: cek security group mengizinkan port 3001, dan kode server sudah di-deploy ke instance
 
 ### CDK Deploy gagal
 - Pastikan `aws configure` sudah benar
 - Jalankan `npx cdk bootstrap` jika belum pernah
-- Cek IAM permissions: memerlukan akses ke CloudFormation, Lambda, API Gateway, Cognito, DynamoDB, S3, Bedrock, Transcribe, Polly
+- Cek IAM permissions: memerlukan akses ke CloudFormation, Lambda, API Gateway, Cognito, DynamoDB, S3, EC2, dan Bedrock (`InvokeModel` + `InvokeModelWithBidirectionalStream`)
 
 ### Build error di frontend
 - Pastikan Node.js >= 18
@@ -811,9 +936,10 @@ Dokumentasi resmi AWS untuk setiap service yang digunakan:
 | Amazon Cognito | [Getting Started with User Pools](https://docs.aws.amazon.com/cognito/latest/developerguide/getting-started-user-pools.html) · [User Attributes](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html) |
 | API Gateway | [REST API + Lambda Tutorial](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-create-api-as-simple-proxy-for-lambda.html) · [CORS for REST APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html) · [Access Control (Cognito Authorizer)](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-control-access-to-api.html) |
 | AWS Lambda | [TypeScript Handler](https://docs.aws.amazon.com/lambda/latest/dg/typescript-handler.html) · [Building with TypeScript](https://docs.aws.amazon.com/lambda/latest/dg/lambda-typescript.html) · [Node.js Handler](https://docs.aws.amazon.com/lambda/latest/dg/nodejs-handler.html) |
-| Amazon Bedrock | [Model Access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) · [Anthropic Claude Models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-claude.html) · [PutUseCaseForModelAccess API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_PutUseCaseForModelAccess.html) |
-| Amazon Transcribe | [Getting Started](https://docs.aws.amazon.com/transcribe/latest/dg/getting-started.html) · [Batch Transcription](https://docs.aws.amazon.com/transcribe/latest/dg/getting-started-med-console-batch.html) |
-| Amazon Polly | [Neural Voices](https://docs.aws.amazon.com/polly/latest/dg/neural-voices.html) · [Synthesize Speech Example](https://docs.aws.amazon.com/polly/latest/dg/synthesize-example.html) |
+| Amazon Bedrock | [Model Access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) · [InvokeModelWithBidirectionalStream](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithBidirectionalStream.html) · [PutUseCaseForModelAccess API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_PutUseCaseForModelAccess.html) |
+| Amazon Nova / Nova Sonic | [Amazon Nova User Guide](https://docs.aws.amazon.com/nova/latest/userguide/what-is-nova.html) |
+| API Gateway WebSocket | [WebSocket API](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html) · [Manage Connections](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-how-to-call-websocket-api-connections.html) |
+| Amazon EC2 | [Getting Started](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html) · [SSM Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html) |
 | Amazon DynamoDB | [Getting Started](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GettingStartedDynamoDB.html) · [Core Components](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.CoreComponents.html) |
 | Amazon S3 | [Uploading Objects](https://docs.aws.amazon.com/AmazonS3/latest/userguide/upload-objects.html) · [Bucket Policies](https://docs.aws.amazon.com/AmazonS3/latest/userguide/example-bucket-policies.html) |
 | AWS Amplify Hosting | [Deploy Web App Tutorial](https://docs.aws.amazon.com/hands-on/latest/deploy-webapp-amplify/deploy-webapp-amplify.html) |
