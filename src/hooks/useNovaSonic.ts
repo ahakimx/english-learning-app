@@ -268,7 +268,13 @@ export default function useNovaSonic(
     setConnectionState('connecting');
 
     const socket = io(SONIC_SERVER_URL, {
-      transports: ['websocket', 'polling'],
+      // Polling first, then upgrade to websocket. This mirrors the server's
+      // transport order and is far more robust: a raw websocket handshake can
+      // hang silently (no connect_error) behind system proxies / VPNs / some
+      // extensions, which would otherwise stall the connection until timeout
+      // without ever falling back. Polling establishes the session first, then
+      // Socket.IO transparently upgrades to websocket when possible.
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
@@ -316,12 +322,28 @@ export default function useNovaSonic(
       try {
         // 1. Create session via REST API (DynamoDB, auto-abandon old sessions)
         console.log('[useNovaSonic] Calling REST API start_session...');
-        const response = await chat({
-          action: 'start_session',
-          jobPosition: config.jobPosition,
-          seniorityLevel: config.seniorityLevel,
-          questionCategory: config.questionCategory,
-        });
+        let response;
+        try {
+          response = await chat({
+            action: 'start_session',
+            jobPosition: config.jobPosition,
+            seniorityLevel: config.seniorityLevel,
+            questionCategory: config.questionCategory,
+            ...(config.resumeSessionId
+              ? { resumeSessionId: config.resumeSessionId }
+              : {}),
+            ...(config.mode ? { mode: config.mode } : {}),
+            ...(config.jdContext ? { jdContext: config.jdContext } : {}),
+          });
+        } catch (restError) {
+          // Tag the stage so the UI can show *why* the session failed instead
+          // of a generic message. The REST call is the first thing that can
+          // fail (auth/network/backend 5xx), and it is independent of the
+          // Nova Sonic proxy server being up.
+          const reason =
+            restError instanceof Error ? restError.message : String(restError);
+          throw new Error(`Gagal membuat sesi di server (REST): ${reason}`);
+        }
         console.log(
           '[useNovaSonic] REST API start_session response:',
           response.sessionId,
@@ -342,7 +364,11 @@ export default function useNovaSonic(
         // 2. Connect Socket.IO if not already connected
         if (!socketRef.current?.connected) {
           const socket = io(SONIC_SERVER_URL, {
-            transports: ['websocket', 'polling'],
+            // Polling first, then upgrade to websocket — see the comment in
+            // connect(). A websocket-first handshake can hang with no
+            // connect_error (proxies/VPN/extensions), causing a silent 10s
+            // timeout instead of falling back to the working polling transport.
+            transports: ['polling', 'websocket'],
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 1000,
@@ -352,21 +378,72 @@ export default function useNovaSonic(
           socketRef.current = socket;
           setupSocketListeners(socket);
 
-          // Wait for connection (with timeout)
+          // Wait for connection (with timeout).
+          //
+          // NOTE: do NOT reject on the first `connect_error`. The socket is
+          // configured with reconnection enabled (5 attempts), and Socket.IO
+          // emits `connect_error` on every failed attempt — including the
+          // initial `websocket` transport probe before it falls back to
+          // `polling`. Rejecting on the first error defeated the reconnection
+          // logic and made a transient hiccup look like a hard failure
+          // ("Gagal memulai sesi interview"). Instead we let it keep retrying
+          // and only fail when either (a) the overall timeout elapses or
+          // (b) Socket.IO exhausts its reconnection attempts.
           await new Promise<void>((resolve, reject) => {
+            let settled = false;
+            let lastError: Error | null = null;
+
+            const cleanupListeners = () => {
+              clearTimeout(timeout);
+              socket.off('connect', onConnect);
+              socket.off('connect_error', onConnectError);
+              socket.io.off('reconnect_failed', onReconnectFailed);
+            };
+
             const timeout = setTimeout(() => {
-              reject(new Error('Socket.IO connection timeout'));
+              if (settled) return;
+              settled = true;
+              cleanupListeners();
+              reject(
+                lastError ??
+                  new Error(
+                    `Tidak dapat terhubung ke server Nova Sonic di ${SONIC_SERVER_URL} dalam 10 detik. Pastikan server berjalan.`,
+                  ),
+              );
             }, 10_000);
 
-            socket.on('connect', () => {
-              clearTimeout(timeout);
+            const onConnect = () => {
+              if (settled) return;
+              settled = true;
+              cleanupListeners();
               resolve();
-            });
+            };
 
-            socket.on('connect_error', (err: Error) => {
-              clearTimeout(timeout);
-              reject(err);
-            });
+            const onConnectError = (err: Error) => {
+              // Remember the latest reason but keep waiting — reconnection may
+              // still succeed within the timeout window.
+              lastError = err;
+              console.warn(
+                '[useNovaSonic] Socket.IO connect attempt failed, retrying:',
+                err.message,
+              );
+            };
+
+            const onReconnectFailed = () => {
+              if (settled) return;
+              settled = true;
+              cleanupListeners();
+              reject(
+                lastError ??
+                  new Error(
+                    `Gagal terhubung ke server Nova Sonic di ${SONIC_SERVER_URL} setelah beberapa percobaan.`,
+                  ),
+              );
+            };
+
+            socket.on('connect', onConnect);
+            socket.on('connect_error', onConnectError);
+            socket.io.on('reconnect_failed', onReconnectFailed);
           });
         }
 
@@ -386,7 +463,19 @@ export default function useNovaSonic(
         setCurrentTurn('ai'); // AI speaks first
       } catch (error) {
         console.error('[useNovaSonic] startSession failed:', error);
+
+        // Tear down the half-open socket so it does not keep retrying in the
+        // background and emitting further connect_error events after we've
+        // already given up on this session.
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+
         setConnectionState('error');
+        setSessionActive(false);
+        sessionActiveRef.current = false;
+
         callbacksRef.current.onError({
           code: 'NOVA_SONIC_ERROR',
           message:
@@ -395,6 +484,11 @@ export default function useNovaSonic(
               : 'Failed to start interview session',
           retryable: true,
         });
+
+        // Re-throw so the caller (SpeakingModule) can abort its transition into
+        // the interview view and return the user to the selection screen
+        // instead of leaving them stuck in a disconnected "Live Interview".
+        throw error;
       }
     },
     [setupSocketListeners],

@@ -2,7 +2,6 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import * as fc from 'fast-check'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import type { JobDescriptionContext } from '../../types'
 import { JD_MIN_LENGTH } from './jdConstants'
 
 // ---------- Module mocks (declared before importing SpeakingModule) ----------
@@ -146,20 +145,6 @@ function countAnalyzeCalls(): number {
   return mockChat.mock.calls.filter(
     (call) => (call[0] as { action?: string })?.action === 'analyze_job_description',
   ).length
-}
-
-/** A throwaway valid `JobDescriptionContext` — only used to type test data. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const _VALID_JD_CONTEXT: JobDescriptionContext = {
-  company: 'Acme',
-  role: 'Engineer',
-  technologies: [],
-  responsibilities: [],
-  requirements: [],
-  softSkills: [],
-  suggestedSeniority: 'mid',
-  suggestedCategory: 'technical',
-  userNotes: '',
 }
 
 // ---------- Property test ----------

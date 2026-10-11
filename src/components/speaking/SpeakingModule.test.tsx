@@ -207,8 +207,10 @@ describe('SpeakingModule', () => {
     renderSpeakingModule()
     await waitForSelector()
     completeSelectionFlow('Product Manager', 'Lead', 'Umum')
+    // The error surfaces the underlying reason so users/devs can diagnose the
+    // failure instead of seeing a generic message.
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Gagal memulai sesi interview. Silakan coba lagi.',
+      'Gagal memulai sesi interview: Connection failed',
     )
     // Should return to select phase (overview page)
     expect(screen.getByText('Speaking Performance')).toBeInTheDocument()

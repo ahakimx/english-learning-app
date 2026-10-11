@@ -269,8 +269,10 @@ export default function SpeakingModule() {
 
       setSessionId(`session-${Date.now()}`)
       setPhase('interview')
-    } catch {
-      setError('Gagal memulai sesi interview. Silakan coba lagi.')
+    } catch (err) {
+      console.error('[SpeakingModule] handleSelectPosition failed:', err)
+      const detail = err instanceof Error ? err.message : String(err)
+      setError(`Gagal memulai sesi interview: ${detail}`)
       setPhase('select')
     }
   }
