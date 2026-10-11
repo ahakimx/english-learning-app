@@ -4,6 +4,8 @@ import { useAuth } from '../../hooks/useAuth'
 import { getProgress } from '../../services/apiClient'
 import type { ProgressData } from '../../types'
 import Sidebar from './Sidebar'
+import HeroSection from './HeroSection'
+import FeatureShowcase from './FeatureShowcase'
 
 /**
  * Default progress data structure used when user is not authenticated.
@@ -111,64 +113,71 @@ export default function Dashboard() {
       <main className="lg:ml-64 pt-16 min-h-screen">
         <div className="max-w-7xl mx-auto p-4 md:p-10 space-y-8 md:space-y-10">
 
-          {/* Hero Progress Section */}
-          <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8 items-stretch">
-            {/* Overall Progress Radial */}
-            <div className="lg:col-span-5 bg-surface-container-low p-6 md:p-8 flex flex-col items-center justify-center text-center rounded-xl">
-              <h2 className="font-headline font-bold text-xl md:text-2xl text-primary mb-6 md:mb-8 self-start">Interview Readiness</h2>
-              {loading ? (
-                <div className="w-48 h-48 md:w-64 md:h-64 rounded-full bg-surface-container animate-pulse" />
-              ) : (
-                <div className="relative w-48 h-48 md:w-64 md:h-64 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                    <circle className="text-surface-container-highest" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeWidth="8" />
-                    <circle className="text-tertiary" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeDasharray={circumference} strokeDashoffset={strokeOffset} strokeLinecap="round" strokeWidth="8" />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-4xl md:text-5xl font-headline font-extrabold text-primary">{overallScore}%</span>
-                    <span className="text-[10px] md:text-xs font-semibold text-on-surface-variant tracking-widest uppercase">Overall Score</span>
+          {/* Hero Progress Section - Conditional rendering based on auth state */}
+          {isAuthenticated ? (
+            <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8 items-stretch">
+              {/* Overall Progress Radial */}
+              <div className="lg:col-span-5 bg-surface-container-low p-6 md:p-8 flex flex-col items-center justify-center text-center rounded-xl">
+                <h2 className="font-headline font-bold text-xl md:text-2xl text-primary mb-6 md:mb-8 self-start">Interview Readiness</h2>
+                {loading ? (
+                  <div className="w-48 h-48 md:w-64 md:h-64 rounded-full bg-surface-container animate-pulse" />
+                ) : (
+                  <div className="relative w-48 h-48 md:w-64 md:h-64 flex items-center justify-center">
+                    <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                      <circle className="text-surface-container-highest" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeWidth="8" />
+                      <circle className="text-tertiary" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeDasharray={circumference} strokeDashoffset={strokeOffset} strokeLinecap="round" strokeWidth="8" />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-4xl md:text-5xl font-headline font-extrabold text-primary">{overallScore}%</span>
+                      <span className="text-[10px] md:text-xs font-semibold text-on-surface-variant tracking-widest uppercase">Overall Score</span>
+                    </div>
                   </div>
-                </div>
-              )}
-              <p className="mt-6 md:mt-8 text-on-surface-variant text-sm max-w-xs">
-                Skor rata-rata dari semua modul. Terus berlatih untuk meningkatkan kemampuan interview Anda.
-              </p>
-            </div>
+                )}
+                <p className="mt-6 md:mt-8 text-on-surface-variant text-sm max-w-xs">
+                  Skor rata-rata dari semua modul. Terus berlatih untuk meningkatkan kemampuan interview Anda.
+                </p>
+              </div>
 
-            {/* Stats Bento Cards */}
-            <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="bg-primary p-6 md:p-8 text-white flex flex-col justify-between rounded-xl">
-                <div>
-                  <span className="material-symbols-outlined text-3xl md:text-4xl mb-4">avg_time</span>
-                  <h3 className="text-2xl md:text-3xl font-headline font-bold">{totalPractice}</h3>
-                  <p className="text-primary-fixed-dim text-sm mt-1">Total Latihan</p>
-                </div>
-                <div className="text-xs font-medium bg-primary-container/30 px-3 py-1 self-start rounded-full mt-4">
-                  {totalSessions} interview · {totalQuizzes} quiz · {totalWriting} writing
-                </div>
-              </div>
-              <div className="bg-tertiary-container p-6 md:p-8 text-tertiary-fixed flex flex-col justify-between rounded-xl">
-                <div>
-                  <span className="material-symbols-outlined text-3xl md:text-4xl mb-4">trophy</span>
-                  <h3 className="text-2xl md:text-3xl font-headline font-bold">{totalSessions}</h3>
-                  <p className="text-tertiary-fixed-dim text-sm mt-1">Sesi Interview</p>
-                </div>
-                <div className="text-xs font-medium bg-tertiary/20 px-3 py-1 self-start rounded-full mt-4">Rata-rata: {speakingScore}%</div>
-              </div>
-              <div className="sm:col-span-2 bg-surface-container-lowest p-6 rounded-xl shadow-sm flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-secondary-container rounded-lg flex items-center justify-center text-primary shrink-0">
-                    <span className="material-symbols-outlined">trending_up</span>
-                  </div>
+              {/* Stats Bento Cards */}
+              <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-primary p-6 md:p-8 text-white flex flex-col justify-between rounded-xl">
                   <div>
-                    <h4 className="font-bold text-on-surface text-sm md:text-base">Weekly Momentum</h4>
-                    <p className="text-[11px] md:text-xs text-on-surface-variant">Speaking {speakingScore}% · Grammar {grammarScore}% · Writing {writingScore}%</p>
+                    <span className="material-symbols-outlined text-3xl md:text-4xl mb-4">avg_time</span>
+                    <h3 className="text-2xl md:text-3xl font-headline font-bold">{totalPractice}</h3>
+                    <p className="text-primary-fixed-dim text-sm mt-1">Total Latihan</p>
+                  </div>
+                  <div className="text-xs font-medium bg-primary-container/30 px-3 py-1 self-start rounded-full mt-4">
+                    {totalSessions} interview · {totalQuizzes} quiz · {totalWriting} writing
                   </div>
                 </div>
-                <button type="button" onClick={() => navigate('/progress')} className="text-tertiary font-bold text-base md:text-lg">→</button>
+                <div className="bg-tertiary-container p-6 md:p-8 text-tertiary-fixed flex flex-col justify-between rounded-xl">
+                  <div>
+                    <span className="material-symbols-outlined text-3xl md:text-4xl mb-4">trophy</span>
+                    <h3 className="text-2xl md:text-3xl font-headline font-bold">{totalSessions}</h3>
+                    <p className="text-tertiary-fixed-dim text-sm mt-1">Sesi Interview</p>
+                  </div>
+                  <div className="text-xs font-medium bg-tertiary/20 px-3 py-1 self-start rounded-full mt-4">Rata-rata: {speakingScore}%</div>
+                </div>
+                <div className="sm:col-span-2 bg-surface-container-lowest p-6 rounded-xl shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 md:w-12 md:h-12 bg-secondary-container rounded-lg flex items-center justify-center text-primary shrink-0">
+                      <span className="material-symbols-outlined">trending_up</span>
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-on-surface text-sm md:text-base">Weekly Momentum</h4>
+                      <p className="text-[11px] md:text-xs text-on-surface-variant">Speaking {speakingScore}% · Grammar {grammarScore}% · Writing {writingScore}%</p>
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => navigate('/progress')} className="text-tertiary font-bold text-base md:text-lg">→</button>
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          ) : (
+            <HeroSection
+              onStartPractice={() => navigate('/speaking')}
+              onRegister={() => navigate('/register')}
+            />
+          )}
 
           {/* Module Cards Section */}
           <section>
@@ -177,6 +186,30 @@ export default function Dashboard() {
                 <h2 className="font-headline font-bold text-xl md:text-2xl text-primary">Learning Modules</h2>
                 <p className="text-on-surface-variant text-sm">Targeted skill development for your next role.</p>
               </div>
+              {/* Login/Register prompt for unauthenticated users */}
+              {!isAuthenticated && (
+                <div className="hidden md:flex items-center gap-2 text-sm text-on-surface-variant">
+                  <span className="material-symbols-outlined text-tertiary text-base">lock</span>
+                  <span>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/login')}
+                      className="text-primary hover:underline font-semibold"
+                    >
+                      Login
+                    </button>
+                    {' atau '}
+                    <button
+                      type="button"
+                      onClick={() => navigate('/register')}
+                      className="text-primary hover:underline font-semibold"
+                    >
+                      Daftar
+                    </button>
+                    {' untuk track progress'}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {/* Speaking Card */}
@@ -234,6 +267,14 @@ export default function Dashboard() {
               </div>
             </div>
           </section>
+
+          {/* Feature Showcase for unauthenticated visitors */}
+          {!isAuthenticated && (
+            <FeatureShowcase
+              onStartPractice={() => navigate('/speaking')}
+              onRegister={() => navigate('/register')}
+            />
+          )}
 
           {/* Recommended for You */}
           <section className="bg-surface-container-low p-6 md:p-10 rounded-2xl">
