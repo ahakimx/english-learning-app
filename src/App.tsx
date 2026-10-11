@@ -33,7 +33,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<LoginForm />} />
         <Route path="/register" element={<RegisterForm />} />
-        <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/speaking" element={<ProtectedRoute><SpeakingModule /></ProtectedRoute>} />
         <Route path="/grammar" element={<ProtectedRoute><GrammarModule /></ProtectedRoute>} />
         <Route path="/writing" element={<ProtectedRoute><WritingModule /></ProtectedRoute>} />

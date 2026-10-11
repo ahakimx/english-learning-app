@@ -5,19 +5,48 @@ import { getProgress } from '../../services/apiClient'
 import type { ProgressData } from '../../types'
 import Sidebar from './Sidebar'
 
+/**
+ * Default progress data structure used when user is not authenticated.
+ * All numeric values are zero, and topicScores is an empty record.
+ */
+const DEFAULT_PROGRESS: ProgressData = {
+  speaking: {
+    totalSessions: 0,
+    averageScore: 0,
+    scoreHistory: [],
+  },
+  grammar: {
+    totalQuizzes: 0,
+    topicScores: {},
+  },
+  writing: {
+    totalReviews: 0,
+    averageScore: 0,
+    scoreHistory: [],
+  },
+}
+
 export default function Dashboard() {
-  const { user } = useAuth()
+  const { user, isAuthenticated } = useAuth()
   const navigate = useNavigate()
   const [progress, setProgress] = useState<ProgressData | null>(null)
   const [loading, setLoading] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      // Skip API call for unauthenticated users
+      setProgress(DEFAULT_PROGRESS)
+      setLoading(false)
+      return
+    }
+
+    // Fetch progress only for authenticated users
     getProgress()
       .then(setProgress)
-      .catch(() => setProgress(null))
+      .catch(() => setProgress(DEFAULT_PROGRESS))
       .finally(() => setLoading(false))
-  }, [])
+  }, [isAuthenticated])
 
   const speakingScore = progress?.speaking.averageScore ?? 0
   const grammarScore = (() => {
@@ -62,9 +91,19 @@ export default function Dashboard() {
           <button type="button" className="hidden sm:block p-2 text-slate-500 hover:text-primary transition-colors active:scale-95 duration-150">
             <span className="material-symbols-outlined">workspace_premium</span>
           </button>
-          <div className="w-8 h-8 rounded-full bg-[#003461] text-white flex items-center justify-center text-xs font-bold shrink-0 border border-outline-variant/30">
-            {user?.email?.charAt(0).toUpperCase() ?? 'U'}
-          </div>
+          {isAuthenticated ? (
+            <div className="w-8 h-8 rounded-full bg-[#003461] text-white flex items-center justify-center text-xs font-bold shrink-0 border border-outline-variant/30">
+              {user?.email?.charAt(0).toUpperCase() || 'U'}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => navigate('/login')}
+              className="px-4 py-2 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-primary/90 transition-colors"
+            >
+              Login
+            </button>
+          )}
         </div>
       </header>
 
