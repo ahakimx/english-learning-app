@@ -75,7 +75,7 @@ describe('GrammarModule', () => {
     renderGrammarModule()
     expect(screen.getByText('Grammar for Business')).toBeInTheDocument()
     expect(screen.getByText('Executive Core')).toBeInTheDocument()
-    expect(screen.getByText('InterviewPrep Pro')).toBeInTheDocument()
+    expect(screen.getByText('SpeakReady')).toBeInTheDocument()
   })
 
   it('renders all 5 grammar topic cards on landing page', () => {

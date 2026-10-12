@@ -1,11 +1,26 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
+import { useScrollProgress } from '../../hooks/useScrollProgress'
+import { useMediaQuery, MOBILE_BREAKPOINT } from '../../hooks/useMediaQuery'
 import { getProgress } from '../../services/apiClient'
 import type { ProgressData } from '../../types'
 import Sidebar from './Sidebar'
-import HeroSection from './HeroSection'
 import FeatureShowcase from './FeatureShowcase'
+import {
+  HeroSection,
+  SocialProofSection,
+  HowItWorksSection,
+  StatsSection,
+  TechStackSection,
+  ComparisonSection,
+  PricingSection,
+  FAQSection,
+  AboutSection,
+  FinalCTASection,
+  Footer,
+  StickyCTA,
+} from '../landing'
 
 /**
  * Default progress data structure used when user is not authenticated.
@@ -34,6 +49,10 @@ export default function Dashboard() {
   const [progress, setProgress] = useState<ProgressData | null>(null)
   const [loading, setLoading] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // Hooks for landing page StickyCTA visibility
+  const scrollProgress = useScrollProgress()
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT)
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -69,6 +88,108 @@ export default function Dashboard() {
   const circumference = 2 * Math.PI * radius
   const strokeOffset = circumference - (overallScore / 100) * circumference
 
+  // CTA handler - navigate to register page
+  const handleCTAClick = () => navigate('/register')
+
+  // StickyCTA visibility: show after 50% scroll on mobile only
+  const showStickyCTA = scrollProgress >= 0.5 && isMobile
+
+  // =========================================================================
+  // UNAUTHENTICATED VIEW - Full Landing Page
+  // =========================================================================
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-surface font-body text-on-surface">
+        {/* TopAppBar - Simplified for landing page (no nav tabs, just brand + login) */}
+        <header className="fixed top-0 left-0 right-0 h-16 bg-[#f8f9fa]/90 backdrop-blur-md flex justify-between items-center px-4 md:px-10 z-50 shadow-sm">
+          <div className="flex items-center gap-4 lg:gap-8">
+            <span className="text-lg md:text-xl font-bold text-[#003461] tracking-tight whitespace-nowrap font-headline">SpeakReady</span>
+          </div>
+          <div className="flex items-center gap-2 md:gap-4">
+            <button
+              type="button"
+              onClick={() => navigate('/login')}
+              className="px-4 py-2 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-primary/90 transition-colors"
+            >
+              Login
+            </button>
+          </div>
+        </header>
+
+        {/* Main Content - Full-width landing page sections */}
+        <main className="pt-16">
+          {/* 1. HeroSection */}
+          <HeroSection
+            id="hero"
+            onStartPractice={handleCTAClick}
+          />
+
+          {/* 2. SocialProofSection */}
+          <SocialProofSection id="social-proof" />
+
+          {/* 3. HowItWorksSection */}
+          <HowItWorksSection
+            id="how-it-works"
+            onCTAClick={handleCTAClick}
+          />
+
+          {/* 4. FeatureShowcase (existing) */}
+          <section id="features" className="py-16 md:py-24 px-4">
+            <div className="max-w-7xl mx-auto">
+              <FeatureShowcase
+                onStartPractice={handleCTAClick}
+                onRegister={handleCTAClick}
+              />
+            </div>
+          </section>
+
+          {/* 5. StatsSection */}
+          <StatsSection id="stats" />
+
+          {/* 6. TechStackSection */}
+          <TechStackSection id="tech-stack" />
+
+          {/* 7. ComparisonSection */}
+          <ComparisonSection id="comparison" />
+
+          {/* 8. PricingSection */}
+          <PricingSection
+            id="pricing"
+            onSelectTier={handleCTAClick}
+          />
+
+          {/* 9. AboutSection */}
+          <AboutSection
+            id="about"
+            onJoinMission={handleCTAClick}
+          />
+
+          {/* 10. FAQSection */}
+          <FAQSection id="faq" />
+
+          {/* 11. FinalCTASection */}
+          <FinalCTASection
+            id="final-cta"
+            onCTAClick={handleCTAClick}
+          />
+
+          {/* 12. Footer */}
+          <Footer />
+        </main>
+
+        {/* StickyCTA - visible on mobile after 50% scroll */}
+        <StickyCTA
+          visible={showStickyCTA}
+          onCTAClick={handleCTAClick}
+          label="Mulai Latihan Gratis"
+        />
+      </div>
+    )
+  }
+
+  // =========================================================================
+  // AUTHENTICATED VIEW - Progress Dashboard (unchanged)
+  // =========================================================================
   return (
     <div className="min-h-screen bg-surface font-body text-on-surface">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -79,7 +200,7 @@ export default function Dashboard() {
           <button type="button" className="lg:hidden p-2 -ml-2 text-slate-600 cursor-pointer" onClick={() => setSidebarOpen(true)}>
             <span className="material-symbols-outlined">menu</span>
           </button>
-          <span className="text-lg md:text-xl font-bold text-[#003461] tracking-tight whitespace-nowrap font-headline">InterviewPrep Pro</span>
+          <span className="text-lg md:text-xl font-bold text-[#003461] tracking-tight whitespace-nowrap font-headline">SpeakReady</span>
           <div className="hidden md:flex gap-6">
             <button type="button" className="text-[#003461] border-b-2 border-[#003461] font-headline font-semibold text-sm h-16 flex items-center">Overview</button>
             <button type="button" onClick={() => navigate('/progress')} className="text-slate-500 hover:text-[#004b87] transition-colors font-headline font-semibold text-sm h-16 flex items-center">Curriculum</button>
@@ -93,19 +214,9 @@ export default function Dashboard() {
           <button type="button" className="hidden sm:block p-2 text-slate-500 hover:text-primary transition-colors active:scale-95 duration-150">
             <span className="material-symbols-outlined">workspace_premium</span>
           </button>
-          {isAuthenticated ? (
-            <div className="w-8 h-8 rounded-full bg-[#003461] text-white flex items-center justify-center text-xs font-bold shrink-0 border border-outline-variant/30">
-              {user?.email?.charAt(0).toUpperCase() || 'U'}
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => navigate('/login')}
-              className="px-4 py-2 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-primary/90 transition-colors"
-            >
-              Login
-            </button>
-          )}
+          <div className="w-8 h-8 rounded-full bg-[#003461] text-white flex items-center justify-center text-xs font-bold shrink-0 border border-outline-variant/30">
+            {user?.email?.charAt(0).toUpperCase() || 'U'}
+          </div>
         </div>
       </header>
 
@@ -113,71 +224,64 @@ export default function Dashboard() {
       <main className="lg:ml-64 pt-16 min-h-screen">
         <div className="max-w-7xl mx-auto p-4 md:p-10 space-y-8 md:space-y-10">
 
-          {/* Hero Progress Section - Conditional rendering based on auth state */}
-          {isAuthenticated ? (
-            <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8 items-stretch">
-              {/* Overall Progress Radial */}
-              <div className="lg:col-span-5 bg-surface-container-low p-6 md:p-8 flex flex-col items-center justify-center text-center rounded-xl">
-                <h2 className="font-headline font-bold text-xl md:text-2xl text-primary mb-6 md:mb-8 self-start">Interview Readiness</h2>
-                {loading ? (
-                  <div className="w-48 h-48 md:w-64 md:h-64 rounded-full bg-surface-container animate-pulse" />
-                ) : (
-                  <div className="relative w-48 h-48 md:w-64 md:h-64 flex items-center justify-center">
-                    <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                      <circle className="text-surface-container-highest" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeWidth="8" />
-                      <circle className="text-tertiary" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeDasharray={circumference} strokeDashoffset={strokeOffset} strokeLinecap="round" strokeWidth="8" />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-4xl md:text-5xl font-headline font-extrabold text-primary">{overallScore}%</span>
-                      <span className="text-[10px] md:text-xs font-semibold text-on-surface-variant tracking-widest uppercase">Overall Score</span>
-                    </div>
+          {/* Hero Progress Section */}
+          <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8 items-stretch">
+            {/* Overall Progress Radial */}
+            <div className="lg:col-span-5 bg-surface-container-low p-6 md:p-8 flex flex-col items-center justify-center text-center rounded-xl">
+              <h2 className="font-headline font-bold text-xl md:text-2xl text-primary mb-6 md:mb-8 self-start">Interview Readiness</h2>
+              {loading ? (
+                <div className="w-48 h-48 md:w-64 md:h-64 rounded-full bg-surface-container animate-pulse" />
+              ) : (
+                <div className="relative w-48 h-48 md:w-64 md:h-64 flex items-center justify-center">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle className="text-surface-container-highest" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeWidth="8" />
+                    <circle className="text-tertiary" cx="50" cy="50" fill="transparent" r={radius} stroke="currentColor" strokeDasharray={circumference} strokeDashoffset={strokeOffset} strokeLinecap="round" strokeWidth="8" />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-4xl md:text-5xl font-headline font-extrabold text-primary">{overallScore}%</span>
+                    <span className="text-[10px] md:text-xs font-semibold text-on-surface-variant tracking-widest uppercase">Overall Score</span>
                   </div>
-                )}
-                <p className="mt-6 md:mt-8 text-on-surface-variant text-sm max-w-xs">
-                  Skor rata-rata dari semua modul. Terus berlatih untuk meningkatkan kemampuan interview Anda.
-                </p>
-              </div>
+                </div>
+              )}
+              <p className="mt-6 md:mt-8 text-on-surface-variant text-sm max-w-xs">
+                Skor rata-rata dari semua modul. Terus berlatih untuk meningkatkan kemampuan interview Anda.
+              </p>
+            </div>
 
-              {/* Stats Bento Cards */}
-              <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="bg-primary p-6 md:p-8 text-white flex flex-col justify-between rounded-xl">
-                  <div>
-                    <span className="material-symbols-outlined text-3xl md:text-4xl mb-4">avg_time</span>
-                    <h3 className="text-2xl md:text-3xl font-headline font-bold">{totalPractice}</h3>
-                    <p className="text-primary-fixed-dim text-sm mt-1">Total Latihan</p>
-                  </div>
-                  <div className="text-xs font-medium bg-primary-container/30 px-3 py-1 self-start rounded-full mt-4">
-                    {totalSessions} interview · {totalQuizzes} quiz · {totalWriting} writing
-                  </div>
+            {/* Stats Bento Cards */}
+            <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-primary p-6 md:p-8 text-white flex flex-col justify-between rounded-xl">
+                <div>
+                  <span className="material-symbols-outlined text-3xl md:text-4xl mb-4">avg_time</span>
+                  <h3 className="text-2xl md:text-3xl font-headline font-bold">{totalPractice}</h3>
+                  <p className="text-primary-fixed-dim text-sm mt-1">Total Latihan</p>
                 </div>
-                <div className="bg-tertiary-container p-6 md:p-8 text-tertiary-fixed flex flex-col justify-between rounded-xl">
-                  <div>
-                    <span className="material-symbols-outlined text-3xl md:text-4xl mb-4">trophy</span>
-                    <h3 className="text-2xl md:text-3xl font-headline font-bold">{totalSessions}</h3>
-                    <p className="text-tertiary-fixed-dim text-sm mt-1">Sesi Interview</p>
-                  </div>
-                  <div className="text-xs font-medium bg-tertiary/20 px-3 py-1 self-start rounded-full mt-4">Rata-rata: {speakingScore}%</div>
-                </div>
-                <div className="sm:col-span-2 bg-surface-container-lowest p-6 rounded-xl shadow-sm flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 md:w-12 md:h-12 bg-secondary-container rounded-lg flex items-center justify-center text-primary shrink-0">
-                      <span className="material-symbols-outlined">trending_up</span>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-on-surface text-sm md:text-base">Weekly Momentum</h4>
-                      <p className="text-[11px] md:text-xs text-on-surface-variant">Speaking {speakingScore}% · Grammar {grammarScore}% · Writing {writingScore}%</p>
-                    </div>
-                  </div>
-                  <button type="button" onClick={() => navigate('/progress')} className="text-tertiary font-bold text-base md:text-lg">→</button>
+                <div className="text-xs font-medium bg-primary-container/30 px-3 py-1 self-start rounded-full mt-4">
+                  {totalSessions} interview · {totalQuizzes} quiz · {totalWriting} writing
                 </div>
               </div>
-            </section>
-          ) : (
-            <HeroSection
-              onStartPractice={() => navigate('/speaking')}
-              onRegister={() => navigate('/register')}
-            />
-          )}
+              <div className="bg-tertiary-container p-6 md:p-8 text-tertiary-fixed flex flex-col justify-between rounded-xl">
+                <div>
+                  <span className="material-symbols-outlined text-3xl md:text-4xl mb-4">trophy</span>
+                  <h3 className="text-2xl md:text-3xl font-headline font-bold">{totalSessions}</h3>
+                  <p className="text-tertiary-fixed-dim text-sm mt-1">Sesi Interview</p>
+                </div>
+                <div className="text-xs font-medium bg-tertiary/20 px-3 py-1 self-start rounded-full mt-4">Rata-rata: {speakingScore}%</div>
+              </div>
+              <div className="sm:col-span-2 bg-surface-container-lowest p-6 rounded-xl shadow-sm flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-secondary-container rounded-lg flex items-center justify-center text-primary shrink-0">
+                    <span className="material-symbols-outlined">trending_up</span>
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-on-surface text-sm md:text-base">Weekly Momentum</h4>
+                    <p className="text-[11px] md:text-xs text-on-surface-variant">Speaking {speakingScore}% · Grammar {grammarScore}% · Writing {writingScore}%</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => navigate('/progress')} className="text-tertiary font-bold text-base md:text-lg">→</button>
+              </div>
+            </div>
+          </section>
 
           {/* Module Cards Section */}
           <section>
@@ -186,30 +290,6 @@ export default function Dashboard() {
                 <h2 className="font-headline font-bold text-xl md:text-2xl text-primary">Learning Modules</h2>
                 <p className="text-on-surface-variant text-sm">Targeted skill development for your next role.</p>
               </div>
-              {/* Login/Register prompt for unauthenticated users */}
-              {!isAuthenticated && (
-                <div className="hidden md:flex items-center gap-2 text-sm text-on-surface-variant">
-                  <span className="material-symbols-outlined text-tertiary text-base">lock</span>
-                  <span>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/login')}
-                      className="text-primary hover:underline font-semibold"
-                    >
-                      Login
-                    </button>
-                    {' atau '}
-                    <button
-                      type="button"
-                      onClick={() => navigate('/register')}
-                      className="text-primary hover:underline font-semibold"
-                    >
-                      Daftar
-                    </button>
-                    {' untuk track progress'}
-                  </span>
-                </div>
-              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {/* Speaking Card */}
@@ -267,14 +347,6 @@ export default function Dashboard() {
               </div>
             </div>
           </section>
-
-          {/* Feature Showcase for unauthenticated visitors */}
-          {!isAuthenticated && (
-            <FeatureShowcase
-              onStartPractice={() => navigate('/speaking')}
-              onRegister={() => navigate('/register')}
-            />
-          )}
 
           {/* Recommended for You */}
           <section className="bg-surface-container-low p-6 md:p-10 rounded-2xl">

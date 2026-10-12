@@ -86,7 +86,7 @@ describe('WritingModule', () => {
 
   it('renders TopAppBar with brand and Writing tab active', () => {
     renderWritingModule()
-    expect(screen.getByText('InterviewPrep Pro')).toBeInTheDocument()
+    expect(screen.getByText('SpeakReady')).toBeInTheDocument()
     // Writing tab should be active (has border styling)
     const writingTab = screen.getByRole('button', { name: 'Writing' })
     expect(writingTab).toBeInTheDocument()

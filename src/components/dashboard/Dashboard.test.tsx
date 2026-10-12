@@ -53,7 +53,7 @@ describe('Dashboard', () => {
   describe('when authenticated', () => {
     it('renders the app title', async () => {
       renderDashboard()
-      expect(await screen.findByText('InterviewPrep Pro')).toBeInTheDocument()
+      expect(await screen.findByText('SpeakReady')).toBeInTheDocument()
     })
 
     it('renders three module cards in sidebar', async () => {
@@ -159,7 +159,7 @@ describe('Dashboard', () => {
     })
   })
 
-  describe('when not authenticated (public access)', () => {
+  describe('when not authenticated (landing page view)', () => {
     beforeEach(() => {
       mockUseAuth.mockReturnValue({
         user: null,
@@ -168,12 +168,14 @@ describe('Dashboard', () => {
       })
     })
 
-    it('renders dashboard without redirecting', async () => {
+    it('renders landing page without redirecting', async () => {
       renderDashboard()
-      expect(await screen.findByText('InterviewPrep Pro')).toBeInTheDocument()
+      // Check for header brand name (first one)
+      const brands = await screen.findAllByText('SpeakReady')
+      expect(brands.length).toBeGreaterThan(0)
     })
 
-    it('displays Login button instead of avatar', async () => {
+    it('displays Login button in header', async () => {
       renderDashboard()
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Login' })).toBeInTheDocument()
@@ -182,21 +184,11 @@ describe('Dashboard', () => {
 
     it('does not call getProgress API when unauthenticated', async () => {
       renderDashboard()
+      // Just wait for render to complete
       await waitFor(() => {
-        expect(screen.getByText('InterviewPrep Pro')).toBeInTheDocument()
+        expect(document.getElementById('hero')).toBeInTheDocument()
       })
       expect(mockGetProgress).not.toHaveBeenCalled()
-    })
-
-    it('displays default zero progress values', async () => {
-      renderDashboard()
-      await waitFor(() => {
-        // Overall score should be 0%
-        expect(screen.getByText('0%')).toBeInTheDocument()
-        // Multiple zeros exist (totalPractice, totalSessions, etc.)
-        const zeros = screen.getAllByText('0')
-        expect(zeros.length).toBeGreaterThan(0)
-      })
     })
 
     it('navigates to /login when Login button is clicked', async () => {
@@ -206,26 +198,67 @@ describe('Dashboard', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/login')
     })
 
-    it('still allows navigation to module routes (will be caught by ProtectedRoute)', async () => {
-      renderDashboard()
-      const continueButtons = await screen.findAllByText('Continue')
-      fireEvent.click(continueButtons[0])
-      expect(mockNavigate).toHaveBeenCalledWith('/speaking')
-    })
-
-    it('FAB still navigates to speaking (will be caught by ProtectedRoute)', async () => {
-      renderDashboard()
-      const fab = await screen.findByLabelText('Mulai interview baru')
-      fireEvent.click(fab)
-      expect(mockNavigate).toHaveBeenCalledWith('/speaking')
-    })
-
-    it('renders module cards with zero progress', async () => {
+    it('renders HeroSection with headline and CTA buttons', async () => {
       renderDashboard()
       await waitFor(() => {
-        // All module cards should show 0% Done
-        const doneLabels = screen.getAllByText('0% Done')
-        expect(doneLabels.length).toBe(3)
+        // HeroSection headline
+        expect(screen.getByText(/Latihan Interview Bahasa Inggris dengan/)).toBeInTheDocument()
+        // Multiple "Mulai Latihan Gratis" buttons exist (hero, final CTA, sticky CTA)
+        const ctaButtons = screen.getAllByText('Mulai Latihan Gratis')
+        expect(ctaButtons.length).toBeGreaterThan(0)
+      })
+    })
+
+    it('renders all landing page sections', async () => {
+      renderDashboard()
+      await waitFor(() => {
+        // Check for key section elements by their IDs
+        expect(document.getElementById('hero')).toBeInTheDocument()
+        expect(document.getElementById('social-proof')).toBeInTheDocument()
+        expect(document.getElementById('how-it-works')).toBeInTheDocument()
+        expect(document.getElementById('features')).toBeInTheDocument()
+        expect(document.getElementById('stats')).toBeInTheDocument()
+        expect(document.getElementById('tech-stack')).toBeInTheDocument()
+        expect(document.getElementById('comparison')).toBeInTheDocument()
+        expect(document.getElementById('pricing')).toBeInTheDocument()
+        expect(document.getElementById('about')).toBeInTheDocument()
+        expect(document.getElementById('faq')).toBeInTheDocument()
+        expect(document.getElementById('final-cta')).toBeInTheDocument()
+      })
+    })
+
+    it('navigates to /register when hero CTA is clicked', async () => {
+      renderDashboard()
+      // Get the first "Mulai Latihan Gratis" button (in hero section)
+      const ctaButtons = await screen.findAllByText('Mulai Latihan Gratis')
+      fireEvent.click(ctaButtons[0])
+      expect(mockNavigate).toHaveBeenCalledWith('/register')
+    })
+
+    it('does not render sidebar for unauthenticated users', async () => {
+      renderDashboard()
+      await waitFor(() => {
+        expect(document.getElementById('hero')).toBeInTheDocument()
+      })
+      // Sidebar element (aside) should not be present
+      expect(document.querySelector('aside')).not.toBeInTheDocument()
+    })
+
+    it('does not render FAB for unauthenticated users', async () => {
+      renderDashboard()
+      await waitFor(() => {
+        expect(document.getElementById('hero')).toBeInTheDocument()
+      })
+      expect(screen.queryByLabelText('Mulai interview baru')).not.toBeInTheDocument()
+    })
+
+    it('renders StickyCTA component (initially hidden)', async () => {
+      renderDashboard()
+      await waitFor(() => {
+        // StickyCTA is rendered but not visible (opacity-0, translate-y-full)
+        const stickyCTA = screen.getByTestId('sticky-cta')
+        expect(stickyCTA).toBeInTheDocument()
+        expect(stickyCTA).toHaveClass('opacity-0')
       })
     })
   })
