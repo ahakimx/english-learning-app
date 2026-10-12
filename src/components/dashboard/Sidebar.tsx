@@ -17,7 +17,7 @@ interface SidebarProps {
 export default function Sidebar({ open, onClose }: SidebarProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { logout } = useAuth()
+  const { logout, isAuthenticated } = useAuth()
 
   function handleNav(route: string) {
     navigate(route)
@@ -84,10 +84,12 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
             <span className="material-symbols-outlined">help_outline</span>
             <span>Support</span>
           </button>
-          <button type="button" onClick={logout} className="flex items-center gap-3 px-4 py-2 text-error hover:bg-white/50 transition-all text-sm font-medium w-full">
-            <span className="material-symbols-outlined">logout</span>
-            <span>Logout</span>
-          </button>
+          {isAuthenticated && (
+            <button type="button" onClick={logout} className="flex items-center gap-3 px-4 py-2 text-error hover:bg-white/50 transition-all text-sm font-medium w-full">
+              <span className="material-symbols-outlined">logout</span>
+              <span>Logout</span>
+            </button>
+          )}
         </div>
       </aside>
     </>
