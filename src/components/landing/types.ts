@@ -221,3 +221,68 @@ export interface LegalLink {
   /** Internal route path */
   path: string;
 }
+
+// ============================================================
+// Feedback Demo Section
+// ============================================================
+
+/**
+ * A grammar/vocabulary correction shown in the sample feedback
+ */
+export interface FeedbackCorrection {
+  /** Phrase as the learner said it */
+  original: string;
+  /** Corrected phrase */
+  correction: string;
+  /** Short explanation in Indonesian */
+  rule: string;
+}
+
+/**
+ * Pre-written example of the feedback a learner receives after one answer
+ */
+export interface FeedbackExample {
+  /** Unique identifier */
+  id: string;
+  /** Short tab label */
+  label: string;
+  /** Interview question asked by the AI interviewer */
+  question: string;
+  /** Learner's original (transcribed) answer */
+  answer: string;
+  /** Scores 0-100 matching the app's FeedbackReport criteria */
+  scores: {
+    grammar: number;
+    vocabulary: number;
+    relevance: number;
+    coherence: number;
+  };
+  /** Corrections found in the answer */
+  corrections: FeedbackCorrection[];
+  /** Filler words detected */
+  fillerWords: { word: string; count: number }[];
+  /** Improved version of the answer */
+  improvedAnswer: string;
+  /** Actionable tips in Indonesian */
+  tips: string[];
+}
+
+// ============================================================
+// Features Section
+// ============================================================
+
+/**
+ * Product feature card
+ */
+export interface Feature {
+  /** Unique identifier */
+  id: string;
+  /** Material Symbol icon name */
+  icon: string;
+  /** Feature title */
+  title: string;
+  /** Feature description */
+  description: string;
+  /** Bullet points of what the learner gets */
+  points: string[];
+}

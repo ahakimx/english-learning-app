@@ -14,7 +14,7 @@
  * Requirements: 7.1, 7.2, 7.3, 7.4, 7.5
  */
 
-import { FOUNDER_INFO } from './data';
+import { FOUNDER_INFO, PRIMARY_CTA_LABEL } from './data';
 import type { SectionProps, FounderInfo } from './types';
 
 interface AboutSectionProps extends SectionProps {
@@ -65,7 +65,7 @@ function FounderAvatar({ founder }: { founder: FounderInfo }) {
  */
 function FounderCard({ founder }: { founder: FounderInfo }) {
   return (
-    <div className="flex flex-col items-center text-center p-6 md:p-8 bg-surface-container rounded-2xl shadow-sm">
+    <div className="flex flex-col items-center text-center p-6 md:p-8 bg-surface-container-lowest ring-1 ring-black/5 rounded-3xl shadow-sm">
       {/* Avatar */}
       <FounderAvatar founder={founder} />
 
@@ -165,8 +165,7 @@ export function AboutSection({
                 </h3>
               </div>
               <p className="text-on-surface-variant leading-relaxed">
-                Menjadi platform nomor satu di Indonesia untuk persiapan
-                interview bahasa Inggris. Kami ingin setiap profesional
+                Kami ingin setiap profesional
                 Indonesia memiliki kepercayaan diri untuk bersaing di pasar
                 kerja global, mendapatkan pekerjaan impian mereka di perusahaan
                 multinasional, dan membuka pintu kesempatan internasional.
@@ -180,7 +179,7 @@ export function AboutSection({
                 className="inline-flex items-center gap-2 bg-primary text-on-primary px-6 py-3 rounded-full font-semibold hover:bg-primary/90 transition-all duration-200 shadow-md hover:shadow-lg"
               >
                 <span className="material-symbols-outlined">rocket_launch</span>
-                <span>Bergabung Sekarang</span>
+                <span>{PRIMARY_CTA_LABEL}</span>
               </button>
             </div>
           </div>

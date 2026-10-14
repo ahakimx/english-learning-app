@@ -7,7 +7,7 @@
  * Requirements: 3.1, 3.2, 3.3, 3.4, 3.5
  */
 
-import { HOW_IT_WORKS_STEPS } from './data';
+import { HOW_IT_WORKS_STEPS, PRIMARY_CTA_LABEL } from './data';
 import type { SectionProps, HowItWorksStep } from './types';
 
 interface HowItWorksSectionProps extends SectionProps {
@@ -20,17 +20,13 @@ interface HowItWorksSectionProps extends SectionProps {
 function StepCard({ step }: { step: HowItWorksStep }) {
   return (
     <div className="flex flex-col items-center text-center">
-      {/* Number badge */}
-      <div className="relative mb-4">
-        <div className="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center text-lg font-bold shadow-md">
-          {step.stepNumber}
-        </div>
-      </div>
-
-      {/* Icon */}
-      <div className="w-16 h-16 rounded-2xl bg-surface-container flex items-center justify-center mb-4">
-        <span className="material-symbols-outlined text-3xl text-primary">
+      {/* Icon with number badge */}
+      <div className="relative z-10 w-16 h-16 rounded-2xl bg-surface-container-lowest ring-1 ring-outline-variant/60 shadow-sm flex items-center justify-center mb-5">
+        <span className="material-symbols-outlined text-3xl text-primary" aria-hidden="true">
           {step.icon}
+        </span>
+        <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-accent text-on-accent text-xs font-bold flex items-center justify-center">
+          {step.stepNumber}
         </span>
       </div>
 
@@ -43,24 +39,6 @@ function StepCard({ step }: { step: HowItWorksStep }) {
       <p className="text-sm text-on-surface-variant leading-relaxed max-w-xs">
         {step.description}
       </p>
-    </div>
-  );
-}
-
-/**
- * Visual connector/arrow between steps (desktop only)
- */
-function StepConnector() {
-  return (
-    <div className="hidden md:flex items-center justify-center px-2 lg:px-4">
-      <div className="flex items-center">
-        {/* Dashed line */}
-        <div className="w-8 lg:w-12 border-t-2 border-dashed border-outline-variant" />
-        {/* Arrow head */}
-        <span className="material-symbols-outlined text-outline-variant text-xl">
-          chevron_right
-        </span>
-      </div>
     </div>
   );
 }
@@ -78,11 +56,11 @@ export function HowItWorksSection({
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section headline */}
         <div className="text-center mb-12 md:mb-16">
-          <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold text-on-surface mb-4">
+          <h2 className="font-headline text-3xl md:text-4xl font-bold text-on-surface mb-4">
             Bagaimana Cara Kerjanya?
           </h2>
           <p className="text-on-surface-variant text-base md:text-lg max-w-2xl mx-auto">
-            Mulai perjalanan Anda menuju interview bahasa Inggris yang sukses dalam 4 langkah mudah
+            Empat langkah sederhana, dari daftar sampai feedback pertama.
           </p>
         </div>
 
@@ -107,15 +85,14 @@ export function HowItWorksSection({
           ))}
         </div>
 
-        {/* Desktop: Horizontal row with connectors */}
-        <div className="hidden md:flex items-start justify-center">
-          {HOW_IT_WORKS_STEPS.map((step, index) => (
-            <div key={step.id} className="flex items-start">
-              <StepCard step={step} />
-              {/* Connector between steps (except after last) */}
-              {index < HOW_IT_WORKS_STEPS.length - 1 && <StepConnector />}
-            </div>
-          ))}
+        {/* Desktop: equal-width columns joined by a dashed line behind the icons */}
+        <div className="hidden md:block relative max-w-5xl mx-auto">
+          <div aria-hidden="true" className="absolute top-8 left-[12.5%] right-[12.5%] border-t-2 border-dashed border-outline-variant" />
+          <div className="grid grid-cols-4 gap-6">
+            {HOW_IT_WORKS_STEPS.map((step) => (
+              <StepCard key={step.id} step={step} />
+            ))}
+          </div>
         </div>
 
         {/* CTA button */}
@@ -124,8 +101,8 @@ export function HowItWorksSection({
             onClick={onCTAClick}
             className="inline-flex items-center gap-2 px-8 py-3 bg-primary text-on-primary font-semibold rounded-full hover:bg-primary/90 transition-colors shadow-md hover:shadow-lg"
           >
-            Daftar Sekarang
-            <span className="material-symbols-outlined text-xl">
+            {PRIMARY_CTA_LABEL}
+            <span className="material-symbols-outlined text-xl" aria-hidden="true">
               arrow_forward
             </span>
           </button>

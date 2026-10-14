@@ -10,6 +10,7 @@
  * Requirements: 9.4
  */
 
+import { PRIMARY_CTA_LABEL } from './data';
 import type { SectionProps } from './types';
 
 interface FinalCTASectionProps extends SectionProps {
@@ -28,11 +29,11 @@ export function FinalCTASection({
   return (
     <section
       id={id}
-      className={`relative py-20 md:py-28 px-4 bg-gradient-to-br from-primary via-primary/90 to-secondary overflow-hidden ${className || ''}`}
+      className={`relative py-20 md:py-28 px-4 bg-gradient-to-br from-primary via-primary-container to-primary overflow-hidden ${className || ''}`}
     >
       {/* Background decorative elements */}
       <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-24 -right-24 w-96 h-96 bg-white/5 rounded-full blur-3xl" />
+        <div className="absolute -top-24 -right-24 w-96 h-96 bg-accent/20 rounded-full blur-3xl" />
         <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-white/5 rounded-full blur-3xl" />
       </div>
 
@@ -54,9 +55,8 @@ export function FinalCTASection({
 
         {/* Supporting text */}
         <p className="text-lg md:text-xl text-white/90 max-w-2xl mx-auto leading-relaxed">
-          Bergabung dengan ribuan profesional Indonesia yang sudah berlatih
-          interview bahasa Inggris dengan AI. Mulai perjalanan Anda menuju karir
-          impian sekarang.
+          Interview berikutnya bisa jadi kesempatan besar Anda. Latih jawaban
+          Anda hari ini dan datang dengan lebih percaya diri.
         </p>
 
         {/* CTA Button */}
@@ -65,7 +65,7 @@ export function FinalCTASection({
             onClick={onCTAClick}
             className="inline-flex items-center gap-3 px-10 py-5 bg-white text-primary font-bold rounded-full hover:bg-white/90 transition-all shadow-2xl hover:shadow-xl hover:scale-105 text-lg"
           >
-            <span>Mulai Latihan Gratis</span>
+            <span>{PRIMARY_CTA_LABEL}</span>
             <span className="material-symbols-outlined text-2xl">
               arrow_forward
             </span>

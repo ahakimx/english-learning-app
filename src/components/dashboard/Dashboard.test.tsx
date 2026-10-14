@@ -202,7 +202,7 @@ describe('Dashboard', () => {
       renderDashboard()
       await waitFor(() => {
         // HeroSection headline
-        expect(screen.getByText(/Latihan Interview Bahasa Inggris dengan/)).toBeInTheDocument()
+        expect(screen.getByRole('heading', { level: 1, name: /Jawab interview bahasa Inggris/ })).toBeInTheDocument()
         // Multiple "Mulai Latihan Gratis" buttons exist (hero, final CTA, sticky CTA)
         const ctaButtons = screen.getAllByText('Mulai Latihan Gratis')
         expect(ctaButtons.length).toBeGreaterThan(0)
@@ -214,12 +214,9 @@ describe('Dashboard', () => {
       await waitFor(() => {
         // Check for key section elements by their IDs
         expect(document.getElementById('hero')).toBeInTheDocument()
-        expect(document.getElementById('social-proof')).toBeInTheDocument()
         expect(document.getElementById('how-it-works')).toBeInTheDocument()
         expect(document.getElementById('features')).toBeInTheDocument()
-        expect(document.getElementById('stats')).toBeInTheDocument()
-        expect(document.getElementById('tech-stack')).toBeInTheDocument()
-        expect(document.getElementById('comparison')).toBeInTheDocument()
+        expect(document.getElementById('feedback-demo')).toBeInTheDocument()
         expect(document.getElementById('pricing')).toBeInTheDocument()
         expect(document.getElementById('about')).toBeInTheDocument()
         expect(document.getElementById('faq')).toBeInTheDocument()
