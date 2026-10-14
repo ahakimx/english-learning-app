@@ -18,7 +18,7 @@
  */
 
 import { useState } from 'react';
-import { FAQ_ITEMS } from './data';
+import { CONTACT_EMAIL, FAQ_ITEMS } from './data';
 import type { SectionProps, FAQItem } from './types';
 
 interface FAQSectionProps extends SectionProps {
@@ -114,7 +114,7 @@ export function FAQSection({
   return (
     <section
       id={id}
-      className={`py-16 md:py-24 px-4 bg-surface ${className || ''}`}
+      className={`py-16 md:py-24 px-4 bg-surface-container-low scroll-mt-16 ${className || ''}`}
     >
       <div className="max-w-3xl mx-auto">
         {/* Section headline */}
@@ -128,7 +128,7 @@ export function FAQSection({
         </div>
 
         {/* FAQ accordion container */}
-        <div className="bg-surface-container rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-surface-container-lowest ring-1 ring-black/5 rounded-2xl shadow-sm overflow-hidden">
           {faqs.map((faq, index) => (
             <FAQAccordionItem
               key={faq.id}
@@ -141,18 +141,20 @@ export function FAQSection({
         </div>
 
         {/* Contact CTA for more questions */}
-        <div className="mt-8 text-center">
-          <p className="text-on-surface-variant mb-3">
-            Masih punya pertanyaan lain?
-          </p>
-          <a
-            href="mailto:hello@interviewprep.pro"
-            className="inline-flex items-center gap-2 text-primary hover:text-primary/80 font-medium transition-colors duration-200"
-          >
-            <span className="material-symbols-outlined text-xl">mail</span>
-            <span>Hubungi Kami</span>
-          </a>
-        </div>
+        {CONTACT_EMAIL && (
+          <div className="mt-8 text-center">
+            <p className="text-on-surface-variant mb-3">
+              Masih punya pertanyaan lain?
+            </p>
+            <a
+              href={`mailto:${CONTACT_EMAIL}`}
+              className="inline-flex items-center gap-2 text-primary hover:text-primary/80 font-medium transition-colors duration-200"
+            >
+              <span className="material-symbols-outlined text-xl" aria-hidden="true">mail</span>
+              <span>Hubungi Kami</span>
+            </a>
+          </div>
+        )}
       </div>
     </section>
   );

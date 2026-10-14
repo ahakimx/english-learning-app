@@ -21,6 +21,13 @@ const getSocialIcon = (platform: SocialLink['platform']): string => {
   return icons[platform];
 };
 
+const PRODUCT_LINKS = [
+  { label: 'Contoh Feedback', href: '#feedback-demo' },
+  { label: 'Fitur', href: '#features' },
+  { label: 'Harga', href: '#pricing' },
+  { label: 'FAQ', href: '#faq' },
+];
+
 interface FooterProps {
   socialLinks?: SocialLink[];
   legalLinks?: LegalLink[];
@@ -36,6 +43,7 @@ export function Footer({
   contactEmail = CONTACT_EMAIL,
 }: FooterProps) {
   const currentYear = new Date().getFullYear();
+  const visibleSocialLinks = socialLinks.filter((link) => link.url && link.url !== '#');
 
   return (
     <footer className="bg-on-surface text-white py-12 md:py-16">
@@ -45,7 +53,7 @@ export function Footer({
           {/* Brand section */}
           <div className="lg:col-span-1">
             <div className="flex items-center gap-2 mb-4">
-              <span className="material-symbols-outlined text-primary text-3xl">
+              <span className="material-symbols-outlined text-accent text-3xl" aria-hidden="true">
                 record_voice_over
               </span>
               <span className="text-xl font-bold">SpeakReady</span>
@@ -54,6 +62,20 @@ export function Footer({
               Platform latihan interview bahasa Inggris berbasis AI untuk
               profesional Indonesia.
             </p>
+          </div>
+
+          {/* Product links section */}
+          <div className="lg:col-span-1">
+            <h3 className="font-semibold text-lg mb-4">Produk</h3>
+            <ul className="space-y-3">
+              {PRODUCT_LINKS.map((link) => (
+                <li key={link.href}>
+                  <a href={link.href} className="text-white/70 hover:text-white transition-colors duration-200">
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
 
           {/* Legal links section */}
@@ -74,6 +96,7 @@ export function Footer({
           </div>
 
           {/* Contact section */}
+          {contactEmail && (
           <div className="lg:col-span-1">
             <h3 className="font-semibold text-lg mb-4">Kontak</h3>
             <a
@@ -84,12 +107,14 @@ export function Footer({
               {contactEmail}
             </a>
           </div>
+          )}
 
           {/* Social links section */}
+          {visibleSocialLinks.length > 0 && (
           <div className="lg:col-span-1">
             <h3 className="font-semibold text-lg mb-4">Ikuti Kami</h3>
             <div className="flex gap-4">
-              {socialLinks.map((link) => (
+              {visibleSocialLinks.map((link) => (
                 <a
                   key={link.platform}
                   href={link.url}
@@ -105,6 +130,7 @@ export function Footer({
               ))}
             </div>
           </div>
+          )}
         </div>
 
         {/* Divider */}

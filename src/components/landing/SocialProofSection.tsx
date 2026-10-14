@@ -97,8 +97,7 @@ export function SocialProofSection({
             Apa Kata Mereka?
           </h2>
           <p className="text-lg text-on-surface/70 max-w-2xl mx-auto">
-            Bergabung dengan ribuan profesional Indonesia yang telah meningkatkan
-            kemampuan interview bahasa Inggris mereka
+            Cerita dari pengguna yang berlatih interview bahasa Inggris di SpeakReady
           </p>
         </div>
 

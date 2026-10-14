@@ -6,21 +6,28 @@ import { useMediaQuery, MOBILE_BREAKPOINT } from '../../hooks/useMediaQuery'
 import { getProgress } from '../../services/apiClient'
 import type { ProgressData } from '../../types'
 import Sidebar from './Sidebar'
-import FeatureShowcase from './FeatureShowcase'
 import {
   HeroSection,
   SocialProofSection,
   HowItWorksSection,
+  FeedbackDemoSection,
+  FeaturesSection,
   StatsSection,
-  TechStackSection,
-  ComparisonSection,
   PricingSection,
   FAQSection,
   AboutSection,
   FinalCTASection,
   Footer,
   StickyCTA,
+  PRIMARY_CTA_LABEL,
 } from '../landing'
+
+const LANDING_NAV_LINKS = [
+  { label: 'Contoh Feedback', href: '#feedback-demo' },
+  { label: 'Fitur', href: '#features' },
+  { label: 'Harga', href: '#pricing' },
+  { label: 'FAQ', href: '#faq' },
+]
 
 /**
  * Default progress data structure used when user is not authenticated.
@@ -100,80 +107,79 @@ export default function Dashboard() {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-surface font-body text-on-surface">
-        {/* TopAppBar - Simplified for landing page (no nav tabs, just brand + login) */}
-        <header className="fixed top-0 left-0 right-0 h-16 bg-[#f8f9fa]/90 backdrop-blur-md flex justify-between items-center px-4 md:px-10 z-50 shadow-sm">
-          <div className="flex items-center gap-4 lg:gap-8">
-            <span className="text-lg md:text-xl font-bold text-[#003461] tracking-tight whitespace-nowrap font-headline">SpeakReady</span>
-          </div>
-          <div className="flex items-center gap-2 md:gap-4">
+        {/* TopAppBar - brand, section links, login + primary CTA */}
+        <header className="fixed top-0 left-0 right-0 h-16 bg-[#f8f9fa]/90 backdrop-blur-md flex justify-between items-center px-4 md:px-10 z-50 border-b border-black/5">
+          <a href="#hero" className="flex items-center gap-2 text-lg md:text-xl font-bold text-[#003461] tracking-tight whitespace-nowrap font-headline">
+            <img src="/favicon.svg" alt="" className="w-7 h-7" />
+            SpeakReady
+          </a>
+          <nav aria-label="Navigasi halaman" className="hidden lg:flex items-center gap-8">
+            {LANDING_NAV_LINKS.map((link) => (
+              <a key={link.href} href={link.href} className="text-sm font-medium text-on-surface-variant hover:text-primary transition-colors">
+                {link.label}
+              </a>
+            ))}
+          </nav>
+          <div className="flex items-center gap-2 md:gap-3">
             <button
               type="button"
               onClick={() => navigate('/login')}
-              className="px-4 py-2 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-primary/90 transition-colors"
+              className="px-3 md:px-4 py-2 text-primary text-sm font-semibold rounded-full hover:bg-primary/5 transition-colors"
             >
               Login
+            </button>
+            <button
+              type="button"
+              onClick={handleCTAClick}
+              className="hidden sm:inline-flex px-4 py-2 bg-primary text-white text-sm font-semibold rounded-full hover:bg-primary-container transition-colors"
+            >
+              Coba Gratis
             </button>
           </div>
         </header>
 
         {/* Main Content - Full-width landing page sections */}
         <main className="pt-16">
-          {/* 1. HeroSection */}
           <HeroSection
             id="hero"
             onStartPractice={handleCTAClick}
+            demoSectionId="feedback-demo"
           />
 
-          {/* 2. SocialProofSection */}
-          <SocialProofSection id="social-proof" />
-
-          {/* 3. HowItWorksSection */}
           <HowItWorksSection
             id="how-it-works"
             onCTAClick={handleCTAClick}
           />
 
-          {/* 4. FeatureShowcase (existing) */}
-          <section id="features" className="py-16 md:py-24 px-4">
-            <div className="max-w-7xl mx-auto">
-              <FeatureShowcase
-                onStartPractice={handleCTAClick}
-                onRegister={handleCTAClick}
-              />
-            </div>
-          </section>
+          {/* The "aha moment": what feedback looks like */}
+          <FeedbackDemoSection
+            id="feedback-demo"
+            onCTAClick={handleCTAClick}
+          />
 
-          {/* 5. StatsSection */}
+          <FeaturesSection id="features" />
+
+          {/* Social proof + stats render nothing until real data is added in landing/data.ts */}
+          <SocialProofSection id="social-proof" />
           <StatsSection id="stats" />
 
-          {/* 6. TechStackSection */}
-          <TechStackSection id="tech-stack" />
-
-          {/* 7. ComparisonSection */}
-          <ComparisonSection id="comparison" />
-
-          {/* 8. PricingSection */}
           <PricingSection
             id="pricing"
             onSelectTier={handleCTAClick}
           />
 
-          {/* 9. AboutSection */}
           <AboutSection
             id="about"
             onJoinMission={handleCTAClick}
           />
 
-          {/* 10. FAQSection */}
           <FAQSection id="faq" />
 
-          {/* 11. FinalCTASection */}
           <FinalCTASection
             id="final-cta"
             onCTAClick={handleCTAClick}
           />
 
-          {/* 12. Footer */}
           <Footer />
         </main>
 
@@ -181,7 +187,7 @@ export default function Dashboard() {
         <StickyCTA
           visible={showStickyCTA}
           onCTAClick={handleCTAClick}
-          label="Mulai Latihan Gratis"
+          label={PRIMARY_CTA_LABEL}
         />
       </div>
     )
