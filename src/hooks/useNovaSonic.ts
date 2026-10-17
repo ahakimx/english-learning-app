@@ -229,6 +229,27 @@ export default function useNovaSonic(
       socket.on('connect', () => {
         console.log('[useNovaSonic] Socket.IO connected');
         setConnectionState('connected');
+
+        // A connect while a session is active is a reconnect. The proxy drops
+        // the Bedrock stream when a socket disconnects, so without restarting
+        // it the microphone keeps streaming into nothing.
+        const config = sessionConfigRef.current;
+        if (sessionActiveRef.current && config) {
+          console.warn('[useNovaSonic] Reconnected mid-session — restarting the Nova Sonic stream');
+          currentAiTranscriptRef.current = '';
+          currentUserTranscriptRef.current = '';
+          aiInterruptedRef.current = false;
+          socket.emit('startSession', {
+            jobPosition: config.jobPosition,
+            seniorityLevel: config.seniorityLevel,
+            questionCategory: config.questionCategory,
+          });
+          callbacksRef.current.onError({
+            code: 'CONNECTION_FAILED',
+            message: 'Koneksi sempat terputus dan sudah tersambung lagi. Silakan sapa interviewer untuk melanjutkan.',
+            retryable: true,
+          });
+        }
       });
 
       socket.on('disconnect', (reason: string) => {
