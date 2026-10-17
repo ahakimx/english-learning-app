@@ -1,6 +1,6 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useAudioCapture, downsample, float32ToPcm16 } from './useAudioCapture';
+import { useAudioCapture, downsample, float32ToPcm16, createVoiceGate } from './useAudioCapture';
 
 // --- Web Audio API mocks ---
 
@@ -62,6 +62,63 @@ beforeEach(() => {
 });
 
 // ---- Pure function tests ----
+
+describe('createVoiceGate', () => {
+  // 85 ms chunks at 16 kHz, like a 4096-frame ScriptProcessor at 48 kHz
+  const CHUNK = 1365;
+  const CHUNK_MS = (CHUNK / 16000) * 1000;
+  const tone = (level: number) => new Float32Array(CHUNK).fill(level);
+  const quiet = () => tone(0.002);
+  const loud = () => tone(0.2);
+
+  function run(gate: ReturnType<typeof createVoiceGate>, chunks: Float32Array[], startMs = 0) {
+    return chunks.map((c, i) => gate(c, startMs + i * CHUNK_MS));
+  }
+
+  it('sends nothing while quiet except a periodic keepalive', () => {
+    const gate = createVoiceGate();
+    const sent = run(gate, Array.from({ length: 60 }, quiet)); // ~5 s
+    const count = sent.reduce((n, s) => n + s.length, 0);
+    expect(count).toBeGreaterThan(0);
+    expect(count).toBeLessThanOrEqual(3);
+  });
+
+  it('sends pre-roll audio together with the first speech chunk', () => {
+    const gate = createVoiceGate({ keepaliveMs: Infinity });
+    run(gate, Array.from({ length: 10 }, quiet));
+    const first = gate(loud(), 10 * CHUNK_MS);
+    expect(first.length).toBeGreaterThan(1);
+    expect(first[first.length - 1][0]).toBeCloseTo(0.2);
+    expect((first.length - 1) * CHUNK_MS).toBeGreaterThanOrEqual(300 - CHUNK_MS);
+  });
+
+  it('keeps sending through the hangover after speech, then stops', () => {
+    const gate = createVoiceGate({ keepaliveMs: Infinity });
+    run(gate, Array.from({ length: 5 }, loud));
+    const after = run(gate, Array.from({ length: 30 }, quiet), 5 * CHUNK_MS);
+    const sentMs = after.filter((s) => s.length > 0).length * CHUNK_MS;
+    expect(sentMs).toBeGreaterThanOrEqual(1200 - CHUNK_MS);
+    expect(sentMs).toBeLessThanOrEqual(1200 + 2 * CHUNK_MS);
+    expect(after.slice(-5).every((s) => s.length === 0)).toBe(true);
+  });
+
+  it('raises the speech threshold in a noisy room', () => {
+    const gate = createVoiceGate({ keepaliveMs: Infinity });
+    // Steady fan noise above minOpenRms: sent at first, ignored once the noise floor has adapted
+    run(gate, Array.from({ length: 500 }, () => tone(0.02)));
+    const noise = run(gate, Array.from({ length: 10 }, () => tone(0.02)), 500 * CHUNK_MS);
+    expect(noise.every((s) => s.length === 0)).toBe(true);
+    expect(gate(tone(0.2), 510 * CHUNK_MS).length).toBeGreaterThan(0);
+  });
+
+  it('keeps the gate open through natural speech with short pauses between words', () => {
+    const gate = createVoiceGate({ keepaliveMs: Infinity });
+    // 20 s of speech: 4 loud chunks, 1 quiet chunk, repeated
+    const speech = Array.from({ length: 235 }, (_, i) => (i % 5 === 4 ? quiet() : loud()));
+    const sent = run(gate, speech);
+    expect(sent.every((s) => s.length > 0)).toBe(true);
+  });
+});
 
 describe('downsample', () => {
   it('returns the same buffer when source and target rates match', () => {

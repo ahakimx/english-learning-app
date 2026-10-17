@@ -4,6 +4,87 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 const TARGET_SAMPLE_RATE = 16000;
 const SCRIPT_PROCESSOR_BUFFER_SIZE = 4096;
 
+/**
+ * Voice gate settings. Streaming silence continuously (10 chunks/s) was measured
+ * to choke the AI audio coming back over the same connection to the proxy, so
+ * the microphone only sends while the user is speaking.
+ */
+export const VOICE_GATE_DEFAULTS = {
+  /** RMS level a chunk must reach to count as speech (before noise adaptation). */
+  minOpenRms: 0.012,
+  /** Speech must be this many times louder than the tracked background noise. */
+  noiseMultiplier: 3,
+  /** Keep sending this long after the last speech chunk, so Nova Sonic hears the turn end. */
+  hangoverMs: 1200,
+  /** Audio from just before speech starts that is sent along, so the first syllable is not clipped. */
+  prerollMs: 300,
+  /** While gated, still send one chunk this often so the stream never goes fully idle. */
+  keepaliveMs: 2000,
+};
+
+function rms(samples: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  return samples.length ? Math.sqrt(sum / samples.length) : 0;
+}
+
+/**
+ * Create a gate that decides which 16 kHz chunks are worth sending.
+ * Returns a function that takes the next chunk and the current time in ms and
+ * returns the chunks to send now (possibly none, or pre-roll + the chunk).
+ */
+export function createVoiceGate(options: Partial<typeof VOICE_GATE_DEFAULTS> = {}) {
+  const cfg = { ...VOICE_GATE_DEFAULTS, ...options };
+  let open = false;
+  let lastSpeechAt = -Infinity;
+  let lastSentAt = -Infinity;
+  // Start low so the first thing heard (often speech) is not mistaken for background noise.
+  let noiseFloor = cfg.minOpenRms / cfg.noiseMultiplier;
+  let preroll: { chunk: Float32Array; ms: number }[] = [];
+  let prerollMs = 0;
+
+  return (chunk: Float32Array, nowMs: number): Float32Array[] => {
+    const level = rms(chunk);
+    const chunkMs = (chunk.length / TARGET_SAMPLE_RATE) * 1000;
+    const isSpeech = level >= Math.max(cfg.minOpenRms, noiseFloor * cfg.noiseMultiplier);
+
+    // Background noise estimate: drops quickly (pauses between words pull it down)
+    // and rises slowly, so only steady noise like a fan lifts it over ~20 s.
+    if (level < noiseFloor) noiseFloor = noiseFloor * 0.7 + level * 0.3;
+    else noiseFloor += (level - noiseFloor) * 0.005;
+
+    if (isSpeech) {
+      lastSpeechAt = nowMs;
+      lastSentAt = nowMs;
+      if (open) return [chunk];
+      open = true;
+      const out = [...preroll.map((p) => p.chunk), chunk];
+      preroll = [];
+      prerollMs = 0;
+      return out;
+    }
+
+    if (open && nowMs - lastSpeechAt <= cfg.hangoverMs) {
+      lastSentAt = nowMs;
+      return [chunk];
+    }
+    open = false;
+
+    // Copy: the browser may reuse the input buffer for the next callback.
+    preroll.push({ chunk: chunk.slice(), ms: chunkMs });
+    prerollMs += chunkMs;
+    while (preroll.length > 1 && prerollMs - preroll[0].ms >= cfg.prerollMs) {
+      prerollMs -= preroll.shift()!.ms;
+    }
+
+    if (nowMs - lastSentAt >= cfg.keepaliveMs) {
+      lastSentAt = nowMs;
+      return [chunk];
+    }
+    return [];
+  };
+}
+
 export interface UseAudioCaptureOptions {
   /** Called with a PCM 16kHz 16-bit mono ArrayBuffer each time a chunk is ready. */
   onAudioChunk: (chunk: ArrayBuffer) => void;
@@ -150,6 +231,7 @@ export function useAudioCapture(options: UseAudioCaptureOptions): UseAudioCaptur
       processorNodeRef.current = processorNode;
 
       const nativeSampleRate = audioContext.sampleRate;
+      const voiceGate = createVoiceGate();
 
       processorNode.onaudioprocess = (event: AudioProcessingEvent) => {
         const inputData = event.inputBuffer.getChannelData(0);
@@ -157,10 +239,10 @@ export function useAudioCapture(options: UseAudioCaptureOptions): UseAudioCaptur
         // Downsample from native rate to 16 kHz
         const downsampled = downsample(inputData, nativeSampleRate, TARGET_SAMPLE_RATE);
 
-        // Convert float samples to 16-bit PCM
-        const pcmBuffer = float32ToPcm16(downsampled);
-
-        onAudioChunkRef.current(pcmBuffer);
+        // Only send while the user is speaking (plus pre-roll, hangover and keepalive)
+        for (const chunk of voiceGate(downsampled, performance.now())) {
+          onAudioChunkRef.current(float32ToPcm16(chunk));
+        }
       };
 
       sourceNode.connect(processorNode);
