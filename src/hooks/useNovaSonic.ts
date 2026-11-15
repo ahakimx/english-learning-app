@@ -11,6 +11,16 @@ import { chat } from '../services/apiClient';
 const SONIC_SERVER_URL =
   import.meta.env.VITE_SONIC_SERVER_URL ?? 'http://localhost:3001';
 
+/**
+ * Told to the proxy in startSession. A proxy that understands it replies with
+ * 16 kHz binary audio (half the bytes) and accepts binary microphone audio;
+ * an older proxy ignores it and keeps sending base64 at 24 kHz.
+ */
+const CLIENT_CAPABILITIES = { binaryAudio: true, playbackRates: [16000, 24000] };
+
+/** What the proxy uses until it says otherwise in sessionStarted. */
+const LEGACY_AUDIO_FORMAT = { sampleRate: 24000, binaryAudio: false };
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -58,6 +68,7 @@ export default function useNovaSonic(
   const currentAiTranscriptRef = useRef('');
   const currentUserTranscriptRef = useRef('');
   const aiInterruptedRef = useRef(false);
+  const audioFormatRef = useRef(LEGACY_AUDIO_FORMAT);
   const conversationHistoryRef = useRef<ConversationTurn[]>([]);
   const questionCountRef = useRef(0);
 
@@ -106,15 +117,28 @@ export default function useNovaSonic(
 
   const setupSocketListeners = useCallback(
     (socket: Socket) => {
-      // -- sessionStarted --
-      socket.on('sessionStarted', () => {
-        console.log('[useNovaSonic] Session started on server');
+      // -- sessionStarted (newer proxies describe the audio format) --
+      socket.on('sessionStarted', (format?: { sampleRate?: number; binaryAudio?: boolean }) => {
+        audioFormatRef.current = {
+          sampleRate: format?.sampleRate ?? LEGACY_AUDIO_FORMAT.sampleRate,
+          binaryAudio: format?.binaryAudio ?? LEGACY_AUDIO_FORMAT.binaryAudio,
+        };
+        console.log('[useNovaSonic] Session started on server, audio format:', audioFormatRef.current);
       });
 
-      // -- audioChunk (base64 PCM from AI) --
-      socket.on('audioChunk', (audioBase64: string) => {
+      // -- audioChunk (PCM from AI: base64 from older proxies, binary from newer) --
+      socket.on('audioChunk', (audio: string | ArrayBuffer) => {
         if (aiInterruptedRef.current) return;
-        callbacksRef.current.onAudio(audioBase64);
+        callbacksRef.current.onAudio(audio, audioFormatRef.current.sampleRate);
+      });
+
+      // -- interrupted (Nova Sonic detected the user talking over the AI) --
+      socket.on('interrupted', () => {
+        console.log('[useNovaSonic] Barge-in detected by Nova Sonic');
+        aiInterruptedRef.current = true; // drop AI audio still in flight until the turn ends
+        currentSpeakerRef.current = 'user';
+        setCurrentTurn('user');
+        callbacksRef.current.onTurnChange({ currentSpeaker: 'user', interrupted: true });
       });
 
       // -- turnSwitch (server detected role change — finalize before new text) --
@@ -239,10 +263,12 @@ export default function useNovaSonic(
           currentAiTranscriptRef.current = '';
           currentUserTranscriptRef.current = '';
           aiInterruptedRef.current = false;
+          audioFormatRef.current = LEGACY_AUDIO_FORMAT;
           socket.emit('startSession', {
             jobPosition: config.jobPosition,
             seniorityLevel: config.seniorityLevel,
             questionCategory: config.questionCategory,
+            clientCapabilities: CLIENT_CAPABILITIES,
           });
           callbacksRef.current.onError({
             code: 'CONNECTION_FAILED',
@@ -472,10 +498,12 @@ export default function useNovaSonic(
         console.log(
           '[useNovaSonic] Emitting startSession to proxy server...',
         );
+        audioFormatRef.current = LEGACY_AUDIO_FORMAT;
         socketRef.current!.emit('startSession', {
           jobPosition: config.jobPosition,
           seniorityLevel: config.seniorityLevel,
           questionCategory: config.questionCategory,
+          clientCapabilities: CLIENT_CAPABILITIES,
         });
 
         setConnectionState('connected');
@@ -521,8 +549,11 @@ export default function useNovaSonic(
 
   const sendAudioChunk = useCallback((chunk: ArrayBuffer) => {
     if (!socketRef.current?.connected) return;
-    const base64 = arrayBufferToBase64(chunk);
-    socketRef.current.emit('audioChunk', base64);
+    // Binary is ~25% smaller than base64; only proxies that announced support get it.
+    socketRef.current.emit(
+      'audioChunk',
+      audioFormatRef.current.binaryAudio ? chunk : arrayBufferToBase64(chunk),
+    );
   }, []);
 
   // -----------------------------------------------------------------------

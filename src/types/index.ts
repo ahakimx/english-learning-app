@@ -279,7 +279,8 @@ export interface SessionInfoPanelProps {
 
 export interface UseNovaSonicOptions {
   onTranscript: (event: TranscriptEvent) => void;
-  onAudio: (audioData: string) => void;
+  /** AI speech: base64 or binary 16-bit PCM at `sampleRate` Hz. */
+  onAudio: (audioData: string | ArrayBuffer, sampleRate: number) => void;
   onTurnChange: (event: TurnEvent) => void;
   onFeedback: (report: FeedbackReport) => void;
   onError: (error: NovaSonicError) => void;

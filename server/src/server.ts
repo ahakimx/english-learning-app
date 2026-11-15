@@ -33,14 +33,53 @@ const BEDROCK_REGION = process.env.AWS_REGION ?? 'us-east-1';
 const BEDROCK_MODEL_ID = process.env.BEDROCK_SONIC_MODEL_ID ?? process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-2-sonic-v1:0';
 const VOICE_ID = process.env.VOICE_ID ?? 'tiffany';
 
+/** Output rate for clients that can resample; half the bytes of the default 24 kHz. */
+const COMPACT_OUTPUT_SAMPLE_RATE = 16000;
+const DEFAULT_OUTPUT_SAMPLE_RATE = 24000;
+
+/**
+ * Sent as the candidate's first message so Nova Sonic opens the interview
+ * (it only responds to user input). Its echo is never shown as a transcript.
+ */
+const KICKOFF_TEXT = "Hi, I'm ready to start the interview.";
+
+/** Text Nova Sonic emits when the user barges in on the assistant. */
+const INTERRUPTED_MARKER = '"interrupted"';
+
+/**
+ * Nova Sonic's turn-taking runs on the input audio timeline, so it needs a
+ * continuous real-time stream. Clients only send audio while the user speaks
+ * (streaming silence over the internet chokes the reply audio), so the proxy
+ * fills the gaps with silence on the short hop to Bedrock instead.
+ */
+const SILENCE_FILL_TICK_MS = 100;
+/** Start filling once no client audio has arrived for this long. */
+const SILENCE_FILL_AFTER_MS = 300;
+/** 100 ms of 16 kHz 16-bit mono silence. */
+const SILENCE_FRAME_BASE64 = Buffer.alloc(3200).toString('base64');
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/** Capabilities a client may announce in startSession. Older clients send none. */
+interface ClientCapabilities {
+  /** Client accepts binary audio frames and may send binary microphone audio. */
+  binaryAudio?: boolean;
+  /** Output sample rates the client can play. */
+  playbackRates?: number[];
+}
 
 interface SessionConfig {
   jobPosition: string;
   seniorityLevel: SeniorityLevel;
   questionCategory: QuestionCategory;
+  clientCapabilities?: ClientCapabilities;
+}
+
+interface AudioFormat {
+  sampleRate: number;
+  binaryAudio: boolean;
 }
 
 interface ConversationTurn {
@@ -61,6 +100,12 @@ interface StreamSession {
   interrupted: boolean;
   conversationHistory: ConversationTurn[];
   keepAliveTimer: ReturnType<typeof setInterval> | null;
+  audioFormat: AudioFormat;
+  lastClientAudioAt: number;
+  /** Wall-clock time the input audio stream started. */
+  inputStartedAt: number;
+  /** Total duration of audio pushed to Nova Sonic so far (client audio + fill). */
+  inputAudioMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +198,7 @@ function buildSessionStartEvent(): Record<string, unknown> {
   };
 }
 
-function buildPromptStartEvent(promptName: string): Record<string, unknown> {
+function buildPromptStartEvent(promptName: string, sampleRateHertz: number): Record<string, unknown> {
   return {
     event: {
       promptStart: {
@@ -161,7 +206,7 @@ function buildPromptStartEvent(promptName: string): Record<string, unknown> {
         textOutputConfiguration: { mediaType: 'text/plain' },
         audioOutputConfiguration: {
           mediaType: 'audio/lpcm',
-          sampleRateHertz: 24000,
+          sampleRateHertz,
           sampleSizeBits: 16,
           channelCount: 1,
           voiceId: VOICE_ID,
@@ -189,6 +234,42 @@ function buildSystemPromptContentStart(promptName: string, contentName: string):
       },
     },
   };
+}
+
+/** User text turn: contentStart(TEXT, USER) → textInput → contentEnd */
+function buildUserTextContentStart(promptName: string, contentName: string): Record<string, unknown> {
+  return {
+    event: {
+      contentStart: {
+        promptName,
+        contentName,
+        type: 'TEXT',
+        interactive: true,
+        role: 'USER',
+        textInputConfiguration: {
+          mediaType: 'text/plain',
+        },
+      },
+    },
+  };
+}
+
+/** Pick the output format from what the client says it supports. */
+function negotiateAudioFormat(caps: ClientCapabilities | undefined): AudioFormat {
+  const compact = caps?.playbackRates?.includes(COMPACT_OUTPUT_SAMPLE_RATE) ?? false;
+  return {
+    sampleRate: compact ? COMPACT_OUTPUT_SAMPLE_RATE : DEFAULT_OUTPUT_SAMPLE_RATE,
+    binaryAudio: caps?.binaryAudio === true,
+  };
+}
+
+/** Microphone audio may arrive as base64 (older clients) or binary. Bedrock wants base64. */
+function audioToBase64(audio: unknown): string | null {
+  if (typeof audio === 'string') return audio;
+  if (Buffer.isBuffer(audio)) return audio.toString('base64');
+  if (audio instanceof ArrayBuffer) return Buffer.from(audio).toString('base64');
+  if (ArrayBuffer.isView(audio)) return Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength).toString('base64');
+  return null;
 }
 
 function buildTextInputEvent(promptName: string, contentName: string, content: string): Record<string, unknown> {
@@ -330,6 +411,8 @@ io.on('connection', (socket) => {
 
       const promptName = `prompt-${Date.now()}`;
       const audioContentName = `audio-${Date.now()}`;
+      const audioFormat = negotiateAudioFormat(config.clientCapabilities);
+      console.log(`[Socket.IO] [${socket.id}] Audio format:`, audioFormat);
 
       session = {
         inputController: controller,
@@ -339,6 +422,10 @@ io.on('connection', (socket) => {
         interrupted: false,
         conversationHistory: [],
         keepAliveTimer: null,
+        audioFormat,
+        lastClientAudioAt: Date.now(),
+        inputStartedAt: Date.now(),
+        inputAudioMs: 0,
       };
 
       // IMPORTANT: Queue events BEFORE client.send() — the SDK starts reading
@@ -351,13 +438,19 @@ io.on('connection', (socket) => {
       controller.push(createStreamEvent(sessionStartEvt));
 
       // 2. promptStart (audio output config, voice)
-      controller.push(createStreamEvent(buildPromptStartEvent(promptName)));
+      controller.push(createStreamEvent(buildPromptStartEvent(promptName, audioFormat.sampleRate)));
 
       // 3. System prompt: contentStart(TEXT, SYSTEM) → textInput → contentEnd
       const systemContentName = `system-prompt-${Date.now()}`;
       controller.push(createStreamEvent(buildSystemPromptContentStart(promptName, systemContentName)));
       controller.push(createStreamEvent(buildTextInputEvent(promptName, systemContentName, systemPrompt)));
       controller.push(createStreamEvent(buildContentEndEvent(promptName, systemContentName)));
+
+      // 3b. Kickoff: a short user text turn so the interviewer opens the conversation.
+      const kickoffContentName = `kickoff-${Date.now()}`;
+      controller.push(createStreamEvent(buildUserTextContentStart(promptName, kickoffContentName)));
+      controller.push(createStreamEvent(buildTextInputEvent(promptName, kickoffContentName, KICKOFF_TEXT)));
+      controller.push(createStreamEvent(buildContentEndEvent(promptName, kickoffContentName)));
 
       // 4. Audio content start (microphone input config)
       controller.push(createStreamEvent(buildContentStartAudioEvent(promptName, audioContentName)));
@@ -381,7 +474,27 @@ io.on('connection', (socket) => {
 
       console.log(`[Socket.IO] [${socket.id}] Stream opened successfully`);
 
-      socket.emit('sessionStarted');
+      // Keep Nova Sonic's audio clock in step with real time while the client is not sending.
+      const activeSession = session;
+      activeSession.inputStartedAt = Date.now();
+      activeSession.inputAudioMs = 0;
+      activeSession.keepAliveTimer = setInterval(() => {
+        if (activeSession.closed) return;
+        const now = Date.now();
+        if (now - activeSession.lastClientAudioAt < SILENCE_FILL_AFTER_MS) return;
+        const behindMs = now - activeSession.inputStartedAt - activeSession.inputAudioMs;
+        for (let filled = 0; filled + 100 <= behindMs && filled < 1000; filled += 100) {
+          activeSession.inputController.push(
+            createStreamEvent(
+              buildAudioInputEvent(SILENCE_FRAME_BASE64, activeSession.promptName, activeSession.audioContentName),
+            ),
+          );
+          activeSession.inputAudioMs += 100;
+        }
+      }, SILENCE_FILL_TICK_MS);
+
+      // Older clients ignore the payload; newer ones use it to decode audio.
+      socket.emit('sessionStarted', { ...audioFormat, aiSpeaksFirst: true });
       console.log(`[Socket.IO] [${socket.id}] Session started, processing output stream...`);
 
       // Process output stream
@@ -396,8 +509,12 @@ io.on('connection', (socket) => {
   });
 
   // --- audioChunk ---
-  socket.on('audioChunk', (audioBase64: string) => {
+  socket.on('audioChunk', (audio: unknown) => {
     if (!session || session.closed) return;
+    const audioBase64 = audioToBase64(audio);
+    if (!audioBase64) return;
+    session.lastClientAudioAt = Date.now();
+    session.inputAudioMs += Buffer.byteLength(audioBase64, 'base64') / 32; // 16 kHz 16-bit mono
 
     try {
       session.inputController.push(
@@ -529,7 +646,10 @@ async function processOutputStream(
             console.log(`[Socket.IO] [${socket.id}] First audio chunk: ${rawBytes.length} bytes (${rawBytes.length / 2} samples)`);
             firstAudioLogged = true;
           }
-          socket.emit('audioChunk', audioOutput.content);
+          socket.emit(
+            'audioChunk',
+            session.audioFormat.binaryAudio ? Buffer.from(audioOutput.content, 'base64') : audioOutput.content,
+          );
         }
       }
 
@@ -543,7 +663,18 @@ async function processOutputStream(
           
           // Skip AUDIO block text (always duplicate)
           if (contentType === 'AUDIO') continue;
-          
+
+          // Barge-in: Nova Sonic signals it with a JSON marker in the text stream.
+          if (textOutput.content.includes(INTERRUPTED_MARKER) && /"interrupted"\s*:\s*true/.test(textOutput.content)) {
+            console.log(`[Socket.IO] [${socket.id}] Barge-in detected`);
+            session.interrupted = true;
+            socket.emit('interrupted');
+            continue;
+          }
+
+          // Our kickoff text is echoed back as a user turn; the candidate never said it.
+          if (rawRole === 'USER' && textOutput.content.trim() === KICKOFF_TEXT) continue;
+
           const role: 'user' | 'ai' = rawRole === 'USER' ? 'user' : 'ai';
           
           if (contentStage === 'SPECULATIVE') {
