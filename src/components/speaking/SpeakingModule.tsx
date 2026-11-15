@@ -91,7 +91,9 @@ export default function SpeakingModule() {
   // --- Nova Sonic hook callbacks ---
 
   // Ref for playChunk — assigned after useAudioPlayback hook below
-  const playChunkRef = useRef<(b64: string) => void | Promise<void>>(() => {})
+  const playChunkRef = useRef<(audio: string | ArrayBuffer, sampleRate?: number) => void | Promise<void>>(() => {})
+  // Ref for stopping playback — assigned after useAudioPlayback hook below
+  const stopPlaybackRef = useRef<() => void>(() => {})
 
   const handleTranscript = useCallback((event: TranscriptEvent) => {
     setTranscripts((prev) => {
@@ -132,11 +134,15 @@ export default function SpeakingModule() {
     })
   }, [])
 
-  const handleAudio = useCallback((audioData: string) => {
-    playChunkRef.current(audioData)
+  const handleAudio = useCallback((audioData: string | ArrayBuffer, sampleRate: number) => {
+    playChunkRef.current(audioData, sampleRate)
   }, [])
 
   const handleTurnChange = useCallback((event: TurnEvent) => {
+    if (event.interrupted) {
+      // The user talked over the AI: drop whatever AI speech is still queued
+      stopPlaybackRef.current()
+    }
     if (event.currentSpeaker === 'ai' && !event.interrupted) {
       // AI started speaking — possibly a new question
       setCurrentQuestionNumber((prev) => prev + 1)
@@ -183,6 +189,7 @@ export default function SpeakingModule() {
 
   const { playChunk, stop: stopAudioPlayback, error: audioPlaybackError } = useAudioPlayback()
   playChunkRef.current = playChunk
+  stopPlaybackRef.current = stopAudioPlayback
 
   const stopAudioCapture = audioCapture.stop
 

@@ -4,7 +4,36 @@ import {
   useAudioPlayback,
   base64ToArrayBuffer,
   pcm16ToFloat32,
+  resample,
 } from './useAudioPlayback';
+
+describe('resample', () => {
+  it('returns the input unchanged when the rates match', () => {
+    const input = new Float32Array([0.1, 0.2, 0.3]);
+    expect(resample(input, 24000, 24000)).toBe(input);
+  });
+
+  it('upsamples 16 kHz to 24 kHz with 1.5x the samples', () => {
+    const input = new Float32Array(1600); // 100 ms at 16 kHz
+    expect(resample(input, 16000, 24000).length).toBe(2400); // 100 ms at 24 kHz
+  });
+
+  it('interpolates between neighbouring samples', () => {
+    const out = resample(new Float32Array([0, 1, 0, 1]), 16000, 24000);
+    expect(out[0]).toBe(0);
+    expect(out[1]).toBeCloseTo(2 / 3); // position 0.667 between 0 and 1
+    expect(out.every((v) => v >= 0 && v <= 1)).toBe(true);
+  });
+
+  it('keeps a 16 kHz tone at the same pitch after resampling', () => {
+    // 500 Hz sine at 16 kHz: zero crossings per second must stay the same at 24 kHz
+    const n = 16000;
+    const sine = Float32Array.from({ length: n }, (_, i) => Math.sin((2 * Math.PI * 500 * i) / 16000));
+    const out = resample(sine, 16000, 24000);
+    const crossings = (s: Float32Array) => s.reduce((c, v, i) => (i && Math.sign(v) !== Math.sign(s[i - 1]) ? c + 1 : c), 0);
+    expect(Math.abs(crossings(out) - crossings(sine))).toBeLessThanOrEqual(2);
+  });
+});
 
 // --- Web Audio API mocks ---
 
